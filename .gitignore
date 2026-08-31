@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.env
+.state/
+results/
+notebooks/.ipynb_checkpoints/
+*.egg-info/
+
+# Shell/IDE config paths that the Claude Code sandbox masks with /dev/null
+# device nodes inside this directory. Not real project files.
+.bashrc
+.bash_profile
+.profile
+.zshrc
+.zprofile
+.gitconfig
+.gitmodules
+.ripgreprc
+.idea
