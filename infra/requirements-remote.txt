@@ -1,0 +1,28 @@
+# Installed on the vast.ai box, on top of the image's existing CUDA + torch.
+# We deliberately do NOT pin torch here -- the image supplies a torch that
+# matches its CUDA driver, and overriding it is the fastest way to break CUDA.
+
+# Jupyter side. jupyter-collaboration is required: the MCP server reads
+# notebook state through Jupyter's real-time-collaboration layer.
+jupyterlab>=4.2,<5
+jupyter-collaboration>=3.0
+jupyter-mcp-tools
+ipykernel
+ipywidgets
+
+# Interpretability
+transformer-lens>=2.0
+nnsight>=0.3
+sae-lens>=4.0
+
+# Supporting
+datasets
+einops
+jaxtyping
+plotly
+circuitsvis
+pandas
+tqdm
+
+# Lets the idle watchdog destroy its own instance.
+vastai>=1.5

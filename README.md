@@ -13,7 +13,7 @@ just tunnel      # in a second terminal; leave it open
 just url         # paste this into VSCode -> Existing Jupyter Server
 # ... work ...
 just sync        # pull results/ back to this machine
-just down        # STOP BILLING
+just down        # sync results/ back, then STOP BILLING
 ```
 
 `just status` shows dollars spent this session; `just burn` shows the total against your budget.

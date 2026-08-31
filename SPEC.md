@@ -8,8 +8,8 @@ Constraints: ~20 hours of human time, <$50 total compute, no local GPU (14 GB RA
 | Decision | Choice | Why |
 |---|---|---|
 | Kernel location | Remote vast.ai, reached by SSH tunnel | No local GPU; tunnel means VSCode *and* the MCP server share one kernel |
-| Model scale | ≤2B (GPT-2, Pythia, Gemma-2-2B) on 1x 3090/4090 | ~$0.30/hr; seconds-per-experiment iteration is what a 20h project needs |
-| Libraries | TransformerLens + nnsight (+ sae_lens) | Neel-stream default; nnsight for anything that outgrows 2B |
+| Model scale | **`gemma-3-4b-it`** on 1x 4090 (~8 GB bf16) | Revised up from ≤2B: verbalized confidence is degenerate in small models, and the project in `PLAN.md` needs it to exist. Still ~$0.30/hr. Debug on `gemma-3-270m-it`. |
+| Libraries | jlens + HF transformers; sae_lens optional | Revised: `PLAN.md` needs the Jacobian lens and linear probes, not TransformerLens. Keeping TL installed but off the critical path avoids the v3 `TransformerBridge` migration risk. |
 | Persistence | git repo + HF cache on a vast.ai volume | Destroying instances must be painless, weight re-download must not be |
 | Real cost risk | Idle instances, not GPU tier | 4090 forgotten for a week = $50. Guardrails target this, not price shopping |
 
@@ -68,7 +68,7 @@ just up          # rent cheapest matching 4090, provision, print token      (~6 
 just tunnel      # ssh -N -L ... (foreground, ctrl-C to stop)
 just status      # running instances, $/hr, hours elapsed, spend to date
 just sync        # rsync results/ back to local
-just down        # destroy instance (volume + its data survive)
+just down        # sync results/ back, then destroy the instance
 just burn        # total $ spent so far this project
 ```
 
@@ -118,7 +118,9 @@ it's in the remote requirements. Requires `uv` locally (not currently installed;
 5. `infra/vast.sh search` — list candidate 4090 offers with price, verify the filter.
 6. `just up` on the cheapest → V1.
 7. `provision.sh` → V2.
-8. Create/attach the persistent volume, set `HF_HOME` → weights survive `just down`.
+8. Set `HF_HOME` to `/workspace/hf_cache` on the instance disk. **No persistent volume:**
+   the disk dies with the instance, so weights re-download (~8 GB, ~5 min) each rental.
+   Accepted deliberately — a volume would bill continuously between sessions.
 
 **Phase C — wiring (~30 min)**
 9. `just tunnel` → V3.
@@ -130,23 +132,19 @@ it's in the remote requirements. Requires `uv` locally (not currently installed;
 13. `watchdog.sh` + `just status` / `just burn` → V7.
 14. README quickstart.
 
-**Phase E — research scoping (separate session)**
-15. Shortlist of 4 candidate 20-hour projects, we pick one.
+**Phase E — research scoping** ✅ *done — see [`PLAN.md`](PLAN.md)*
+15. ~~Shortlist of candidate projects, pick one.~~ Chosen; `PLAN.md` carries the research plan and
+    its own phases, gates, and risks from here.
 
-## 5. Candidate projects (headlines only — expanded after the env is green)
-All sized for ≤2B models and ~15 hours of research time.
+## 5. Project
 
-- **A. SAE feature ablation vs. task performance** — take Gemma Scope features on Gemma-2-2B,
-  ablate top-k features for a narrow capability, measure how specific the damage is.
-- **B. Replicate-and-stress an existing circuit result** — e.g. IOI or the docstring circuit on a
-  *different* model, checking whether the claimed mechanism transfers.
-- **C. Refusal / sycophancy direction transfer** — does a steering direction found in one 2B model
-  transfer to another after activation alignment?
-- **D. SAE feature stability across training seeds** — how much of the learned dictionary is
-  model-intrinsic vs. run-specific.
+**Chosen — see [`PLAN.md`](PLAN.md).** *Where does the confidence–faithfulness gap live relative to
+J-space?* Locates the accuracy and verbalized-confidence directions against the Jacobian lens's
+verbalizable subspace, to distinguish an **availability** failure (signal absent from the
+reportable subspace) from a **routing** failure (present but unused by verbalization).
 
-Recommendation: **B or A** — both yield a writeup even if the result is negative, which matters
-when you only have 20 hours.
+The candidate shortlist that preceded it (SAE feature ablation, circuit replication, refusal
+direction transfer, SAE seed stability) is superseded and no longer tracked here.
 
 ## 6. Explicit non-goals
 - No multi-GPU / model-parallel plumbing.
