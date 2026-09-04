@@ -2,10 +2,12 @@
   "mcpServers": {
     "jupyter": {
       "command": "uvx",
-      "args": ["jupyter-mcp-server@latest"],
+      "args": [
+        "jupyter-mcp-server@latest"
+      ],
       "env": {
         "JUPYTER_URL": "http://127.0.0.1:8888",
-        "JUPYTER_TOKEN": "${JUPYTER_TOKEN}",
+        "JUPYTER_TOKEN": "10331562296006eb9b590c94b5a40268101a159c8f965a210679818ac7d6ae23",
         "ALLOW_IMG_OUTPUT": "true"
       }
     }

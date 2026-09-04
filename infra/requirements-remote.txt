@@ -10,10 +10,26 @@ jupyter-mcp-tools
 ipykernel
 ipywidgets
 
-# Interpretability
+# Interpretability.
+# jlens (the Jacobian lens) is the critical path -- SPEC.md L12 -- and is not on
+# PyPI, so it installs from source. It requires transformers>=5.5, which
+# transformer-lens/sae-lens likely do not tolerate; those are deliberately off
+# the critical path, so jlens wins the version fight.
+jlens @ git+https://github.com/anthropics/jacobian-lens.git
 transformer-lens>=2.0
 nnsight>=0.3
 sae-lens>=4.0
+
+# Modelling. transformers/huggingface_hub arrive transitively via the libraries
+# above, but PLAN.md loads them directly, so they are pinned as direct deps.
+# >=5.5 is jlens's floor, not ours.
+transformers>=5.5
+huggingface_hub>=0.26
+
+# Probes and stats (PLAN.md 5.2/5.4/5.5): logistic + ridge probes, the
+# covariance-matched null, and the V9 Spearman dose-response test.
+scikit-learn
+scipy
 
 # Supporting
 datasets
@@ -22,6 +38,7 @@ jaxtyping
 plotly
 circuitsvis
 pandas
+pyarrow          # parquet, for the 02 behavioral tables
 tqdm
 
 # Lets the idle watchdog destroy its own instance.

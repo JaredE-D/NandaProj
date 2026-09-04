@@ -8,8 +8,8 @@ Constraints: ~20 hours of human time, <$50 total compute, no local GPU (14 GB RA
 | Decision | Choice | Why |
 |---|---|---|
 | Kernel location | Remote vast.ai, reached by SSH tunnel | No local GPU; tunnel means VSCode *and* the MCP server share one kernel |
-| Model scale | **`gemma-3-4b-it`** on 1x 4090 (~8 GB bf16) | Revised up from ≤2B: verbalized confidence is degenerate in small models, and the project in `PLAN.md` needs it to exist. Still ~$0.30/hr. Debug on `gemma-3-270m-it`. |
-| Libraries | jlens + HF transformers; sae_lens optional | Revised: `PLAN.md` needs the Jacobian lens and linear probes, not TransformerLens. Keeping TL installed but off the critical path avoids the v3 `TransformerBridge` migration risk. |
+| Model scale | **`gemma-3-4b-it`** on 1x 4090 (~8 GB bf16) | Revised up from ≤2B: verbalized confidence is degenerate in small models, and the project in `PLAN2.md` needs it to exist. Still ~$0.30/hr. Debug on `gemma-3-270m-it`. |
+| Libraries | jlens + HF transformers; sae_lens optional | Revised: `PLAN2.md` needs the Jacobian lens and linear probes, not TransformerLens. Keeping TL installed but off the critical path avoids the v3 `TransformerBridge` migration risk. |
 | Persistence | git repo + HF cache on a vast.ai volume | Destroying instances must be painless, weight re-download must not be |
 | Real cost risk | Idle instances, not GPU tier | 4090 forgotten for a week = $50. Guardrails target this, not price shopping |
 
@@ -132,16 +132,21 @@ it's in the remote requirements. Requires `uv` locally (not currently installed;
 13. `watchdog.sh` + `just status` / `just burn` → V7.
 14. README quickstart.
 
-**Phase E — research scoping** ✅ *done — see [`PLAN.md`](PLAN.md)*
-15. ~~Shortlist of candidate projects, pick one.~~ Chosen; `PLAN.md` carries the research plan and
+**Phase E — research scoping** ✅ *done — see [`PLAN2.md`](PLAN2.md)*
+15. ~~Shortlist of candidate projects, pick one.~~ Chosen; `PLAN2.md` carries the research plan and
     its own phases, gates, and risks from here.
 
 ## 5. Project
 
-**Chosen — see [`PLAN.md`](PLAN.md).** *Where does the confidence–faithfulness gap live relative to
-J-space?* Locates the accuracy and verbalized-confidence directions against the Jacobian lens's
-verbalizable subspace, to distinguish an **availability** failure (signal absent from the
-reportable subspace) from a **routing** failure (present but unused by verbalization).
+**Chosen — see [`PLAN2.md`](PLAN2.md).** *Where does a lie get made?* Under an instructed lie the
+honest answer is known by construction, so the J-lens can ask whether the true answer is still in
+the **reportable** subspace at the layer where the model says something else — and activation
+patching can then name the heads and MLPs that keep it out of the output.
+
+Plan 1 (`misc/plan1old.md`) asked the same availability-vs-routing question about the
+confidence–faithfulness gap. It is superseded because its primary arm inferred from absence; the
+deception framing turns the same measurement into a positive detection. Its pre-registration is
+kept unrun.
 
 The candidate shortlist that preceded it (SAE feature ablation, circuit replication, refusal
 direction transfer, SAE seed stability) is superseded and no longer tracked here.

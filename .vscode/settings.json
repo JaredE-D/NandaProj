@@ -8,6 +8,12 @@
   "jupyter.askForKernelRestart": false,
   "jupyter.interactiveWindow.creationMode": "perFile",
 
+  // Widget JS (ipywidgets, circuitsvis, tqdm bars) must be fetched from
+  // somewhere. VS Code defaults this to [], which loads nothing, and its
+  // fallback probe -- GET /nbextensions/jupyter-js-widgets/extension.js --
+  // 404s against JupyterLab 4, which does not serve that classic path.
+  "jupyter.widgetScriptSources": ["jsdelivr.com", "unpkg.com"],
+
   // Big activation tensors otherwise flood the output pane.
   "notebook.output.textLineLimit": 60,
   "notebook.output.scrolling": true,

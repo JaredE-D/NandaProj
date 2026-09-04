@@ -102,3 +102,43 @@ def test_verbs_exist(verb):
         check=False,
     )
     assert "usage: parse.py" not in out.stderr
+
+
+class TestHasInstance:
+    """`down` trusts this to decide whether a destroy actually happened.
+
+    A false 'gone' means we delete the local instance id while the box keeps
+    billing, and `just status` then reports nothing to destroy -- the exact
+    failure this verb exists to prevent.
+    """
+
+    def _run(self, payload, wanted):
+        import json
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        return subprocess.run(
+            [sys.executable, str(root / "infra" / "parse.py"), "has-instance", str(wanted)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            check=False,
+        ).returncode
+
+    def test_present_in_list_exits_zero(self):
+        assert self._run([{"id": 42}, {"id": 7}], 42) == 0
+
+    def test_absent_exits_nonzero(self):
+        assert self._run([{"id": 7}], 42) == 1
+
+    def test_empty_account_exits_nonzero(self):
+        assert self._run([], 42) == 1
+
+    def test_bare_object_is_accepted(self):
+        assert self._run({"id": 42}, 42) == 0
+
+    def test_id_compared_as_string_not_identity(self):
+        # vast.ai returns ints; we pass the id in from a file as text.
+        assert self._run([{"id": 42}], "42") == 0

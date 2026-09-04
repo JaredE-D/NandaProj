@@ -5,14 +5,31 @@ from nandaproj import config, viz
 
 
 def test_default_preset_is_smallest():
+    # Default must be the debug model: an accidental run should cost seconds.
     cfg = config.get_model_config()
-    assert cfg.name == "gpt2-small"
-    assert not cfg.needs_hf_token
+    assert cfg.name == "google/gemma-3-270m-it"
+    assert cfg.n_params == "270M"
 
 
 def test_preset_lookup_by_name():
-    assert config.get_model_config("gemma").name == "gemma-2-2b"
-    assert config.get_model_config("gemma").needs_hf_token
+    assert config.get_model_config("target").name == "google/gemma-3-4b-it"
+    assert config.get_model_config("target").needs_hf_token
+
+
+def test_all_gemma_presets_are_gated():
+    # Every Gemma repo is gated; forgetting HF_TOKEN fails *after* billing
+    # starts, so the flag must be set on all of them.
+    for name, cfg in config.PRESETS.items():
+        assert cfg.needs_hf_token, f"{name} not marked gated"
+        assert cfg.dtype == "bfloat16", f"{name} should be bf16"
+
+
+def test_every_preset_has_an_instruction_tuned_lens():
+    # PLAN2.md 4.0: use the -it lens, never the base one.
+    for name, cfg in config.PRESETS.items():
+        assert cfg.has_lens, f"{name} has no lens_id"
+        assert cfg.lens_id.endswith("-it"), f"{name} lens is not -it: {cfg.lens_id}"
+        assert cfg.lens_id == cfg.name.split("/")[-1]
 
 
 def test_unknown_preset_raises():
@@ -21,8 +38,8 @@ def test_unknown_preset_raises():
 
 
 def test_preset_env_var_is_respected(monkeypatch):
-    monkeypatch.setenv("NANDA_PRESET", "pythia")
-    assert config.get_model_config().name == "pythia-160m"
+    monkeypatch.setenv("NANDA_PRESET", "main")
+    assert config.get_model_config().name == "google/gemma-3-1b-it"
 
 
 def test_workspace_env_var_redirects_paths(monkeypatch, tmp_path):

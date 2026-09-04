@@ -25,8 +25,19 @@ IDLE_KILL_MIN="${IDLE_KILL_MIN:-45}"
 IMAGE="${IMAGE:-vastai/pytorch:cuda-12.4.1-auto}"
 DISK_GB="${DISK_GB:-40}"
 LOCAL_PORT="${LOCAL_PORT:-8888}"
+MIN_INET="${MIN_INET:-500}"
 
 die() { echo "error: $*" >&2; exit 1; }
+
+# vast.ai does not reliably inject the account's ssh key into a new container,
+# so `attach ssh` is called explicitly. Idempotent: "already associated" is a
+# success for our purposes, not an error.
+_attach_key() {
+  local pub
+  pub="$(ls "$HOME"/.ssh/*.pub 2>/dev/null | head -1)"
+  [ -n "$pub" ] || { echo "   no local ssh key to attach" >&2; return 0; }
+  $VASTAI attach ssh "$(instance_id)" "$(cat "$pub")" >/dev/null 2>&1 || true
+}
 have_instance() { [ -s "$STATE/instance_id" ]; }
 instance_id() { cat "$STATE/instance_id"; }
 
@@ -37,9 +48,17 @@ instance_id() { cat "$STATE/instance_id"; }
 # GEO_FILTER keeps the box near you. Latency is paid on every cell execution
 # through the tunnel, and the price spread across regions is pennies per hour --
 # so region beats price here. Empty GEO_FILTER means "anywhere".
+# inet_down is the host's *advertised* figure, not a measurement: machine
+# 148361 advertised 216 Mbit/s and delivered about 3. Raising the floor is a
+# weak filter but a free one; EXCLUDE_MACHINES is the part that actually works,
+# so add a machine_id here whenever a host turns out to be slow.
 _query() {
+  local excl=""
+  for m in ${EXCLUDE_MACHINES:-}; do
+    excl="$excl machine_id!=$m"
+  done
   echo "gpu_name=$GPU_NAME num_gpus=1 rentable=true reliability>0.98 \
-disk_space>$DISK_GB inet_down>200 dph<$MAX_PRICE ${GEO_FILTER:-}"
+disk_space>$DISK_GB inet_down>$MIN_INET dph<$MAX_PRICE ${GEO_FILTER:-}$excl"
 }
 
 cmd_search() {
@@ -62,10 +81,25 @@ cmd_up() {
             | "$PY" "$ROOT/infra/parse.py" cheapest-price)"
   echo ">> renting offer $offer at \$$dph/hr"
 
+  # vast.ai's own ssh-key injection has been unreliable on this account: the
+  # API reports the key as associated with the instance while the container's
+  # authorized_keys never receives it, so sshd rejects the key without even
+  # asking for a signature. Reboots, detach/reattach, and re-registering the
+  # key all failed across three hosts. So write authorized_keys ourselves at
+  # container start and stop depending on their injection at all.
+  local pub onstart
+  pub="$(cat "$(ls "$HOME"/.ssh/*.pub 2>/dev/null | head -1)" 2>/dev/null || true)"
+  [ -n "$pub" ] || die "no ssh public key in ~/.ssh -- run 'just doctor'"
+  onstart="mkdir -p /root/.ssh && chmod 700 /root/.ssh && \
+echo '$pub' >> /root/.ssh/authorized_keys && \
+sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && \
+chmod 600 /root/.ssh/authorized_keys"
+
   $VASTAI create instance "$offer" \
     --image "$IMAGE" \
     --disk "$DISK_GB" \
     --ssh --direct \
+    --onstart-cmd "$onstart" \
     --env "-e JUPYTER_TOKEN=$JUPYTER_TOKEN -e HF_TOKEN=${HF_TOKEN:-} -p 8888:8888" \
     --raw | "$PY" "$ROOT/infra/parse.py" new-id > "$STATE/instance_id"
 
@@ -73,31 +107,88 @@ cmd_up() {
   date +%s > "$STATE/started_at"
   echo "$dph" > "$STATE/dph"
   echo ">> instance $(instance_id) created; waiting for it to come up ..."
+  _attach_key
   cmd_wait
+
+  # The search offer's dph excludes the disk we actually asked for -- a 40 GB
+  # box quoted at $0.313 bills at $0.355. Record the instance's real rate, or
+  # `just burn` under-reports for the whole project.
+  local real
+  real="$($VASTAI show instance "$(instance_id)" --raw 2>/dev/null \
+          | "$PY" "$ROOT/infra/parse.py" dph || true)"
+  if [ -n "$real" ]; then
+    echo "$real" > "$STATE/dph"
+    echo ">> actual rate \$$real/hr (search quoted \$$dph)"
+  fi
   echo ">> provisioning ..."
   cmd_provision
   echo
   echo ">> ready. Next:  just tunnel   (in another terminal)"
 }
 
+# Take ownership of an instance created elsewhere (the web console), so the
+# rest of the tooling -- provision, tunnel, sync, status, down -- works on it.
+# Useful when `up` cannot produce a reachable box but the console can.
+cmd_adopt() {
+  local id="${1:-}"
+  [ -n "$id" ] || die "usage: just adopt <instance_id>"
+  if have_instance && [ "$(instance_id)" != "$id" ]; then
+    die "already tracking instance $(instance_id) -- 'just down' it first"
+  fi
+  $VASTAI show instance "$id" --raw >/dev/null 2>&1 \
+    || die "instance $id not found on this account"
+  echo "$id" > "$STATE/instance_id"
+  date +%s > "$STATE/started_at"
+  local real
+  real="$($VASTAI show instance "$id" --raw | "$PY" "$ROOT/infra/parse.py" dph || true)"
+  echo "${real:-0}" > "$STATE/dph"
+  echo ">> adopted instance $id at \$${real:-?}/hr"
+  echo ">> note: elapsed time counts from now, so 'just burn' undercounts any"
+  echo "   time it ran before adoption."
+  echo ">> next:  just provision"
+}
+
+# Boot means pulling a multi-GB CUDA image on the host's connection. Five
+# minutes is not enough; 20 is comfortable. The instance bills throughout, so
+# this timeout only decides when we stop *watching*, never when we stop paying.
 cmd_wait() {
   have_instance || die "no instance"
-  local i status
-  for i in $(seq 1 60); do
+  local i status tries
+  tries=$(( ${BOOT_TIMEOUT_MIN:-20} * 12 ))   # one poll per 5s
+  for i in $(seq 1 "$tries"); do
     status="$($VASTAI show instance "$(instance_id)" --raw \
               | "$PY" "$ROOT/infra/parse.py" status || true)"
     if [ "$status" = "running" ]; then
-      # SSH takes a few more seconds after the status flips.
-      for _ in $(seq 1 30); do
+      # SSH takes a while after the status flips, and vast.ai does not reliably
+      # inject the account key into the container at creation -- an explicit
+      # `attach ssh` is what actually pushes it, and propagation to the box can
+      # take a minute or more. So: retry for 5 minutes, re-attaching partway
+      # through rather than failing on the first refusal.
+      local j
+      for j in $(seq 1 60); do
         if cmd_ssh true 2>/dev/null; then echo ">> ssh is up"; return 0; fi
+        if [ "$j" = 6 ] || [ "$j" = 24 ]; then
+          echo; echo "   ssh refused -- (re)attaching key and waiting for it to propagate"
+          _attach_key
+        fi
+        printf '\r   waiting for ssh (%ds)' "$((j * 5))"
         sleep 5
       done
-      die "instance running but ssh never answered"
+      die "instance is running but ssh never answered after 5 min.
+  The key is registered but the box is not accepting it. Try:
+    just ssh true             # see the raw error
+    just down --force         # give up on this host and rent another"
     fi
     printf '\r   status=%-12s (%ds)' "${status:-pending}" "$((i * 5))"
     sleep 5
   done
-  die "instance never reached 'running' -- check cloud.vast.ai console"
+  die "gave up waiting after ${BOOT_TIMEOUT_MIN:-20} min (last status: ${status:-pending}).
+  The instance is still alive and still BILLING -- this timeout only stopped the
+  watching, not the boot. Nothing is necessarily wrong. Either:
+    just status               # is it 'running' now?
+    just provision            # finish the setup this wait was going to do
+    just down                 # or stop paying for it
+  Raise BOOT_TIMEOUT_MIN in .env if slow image pulls are routine on your hosts."
 }
 
 cmd_provision() {
@@ -134,9 +225,32 @@ cmd_down() {
   fi
 
   cmd_burn_record
-  $VASTAI destroy instance "$id"
+
+  # `vastai destroy` prompts "[y/N]". With no stdin it aborts *and still exits
+  # 0*, so neither the prompt nor the exit code can be trusted. Feed it yes,
+  # then confirm against the API before deleting local state -- forgetting the
+  # instance id while the box is alive is strictly worse than not destroying
+  # it, because `just status` would then report nothing to destroy.
+  yes 2>/dev/null | $VASTAI destroy instance "$id" || true
+
+  local i gone=0
+  for i in $(seq 1 12); do
+    sleep 3
+    if ! $VASTAI show instances --raw 2>/dev/null \
+         | "$PY" "$ROOT/infra/parse.py" has-instance "$id"; then
+      gone=1; break
+    fi
+  done
+
+  if [ "$gone" -ne 1 ]; then
+    die "instance $id is STILL RUNNING and still billing after a destroy attempt.
+  Local state has been left intact so 'just down' can be retried.
+  Destroy it by hand now:  vastai destroy instance $id
+  Or in the web console under Instances."
+  fi
+
   rm -f "$STATE/instance_id" "$STATE/started_at" "$STATE/dph"
-  echo ">> destroyed $id"
+  echo ">> destroyed $id -- confirmed gone from the account"
 }
 
 # --- connection ----------------------------------------------------------
@@ -250,6 +364,7 @@ case "${1:-}" in
   search)     shift; cmd_search "$@" ;;
   up)         shift; cmd_up "$@" ;;
   wait)       shift; cmd_wait "$@" ;;
+  adopt)      shift; cmd_adopt "$@" ;;
   provision)  shift; cmd_provision "$@" ;;
   ssh)        shift; cmd_ssh "$@" ;;
   tunnel)     shift; cmd_tunnel "$@" ;;
@@ -259,5 +374,5 @@ case "${1:-}" in
   burn)       shift; cmd_burn "$@" ;;
   balance)    shift; cmd_balance "$@" ;;
   down)       shift; cmd_down "$@" ;;
-  *) echo "usage: vast.sh {search|up|wait|provision|ssh|tunnel|hostport|sync|status|burn|balance|down}" >&2; exit 2 ;;
+  *) echo "usage: vast.sh {search|up|adopt|wait|provision|ssh|tunnel|hostport|sync|status|burn|balance|down}" >&2; exit 2 ;;
 esac

@@ -21,6 +21,10 @@ up:
 down *ARGS:
     @{{vast}} down {{ARGS}}
 
+# Take over an instance created in the web console.
+adopt ID:
+    @{{vast}} adopt {{ID}}
+
 # Instance state and dollars spent.
 status:
     @{{vast}} status
@@ -43,9 +47,10 @@ tunnel:
 url:
     @printf 'http://127.0.0.1:%s/lab?token=%s\n' "${LOCAL_PORT:-8888}" "$(grep '^JUPYTER_TOKEN=' .env | cut -d= -f2-)"
 
-# Shell on the box.
+# Shell on the box. ARGS is quoted: unquoted, a ';' or '&&' in the command
+# would terminate the local shell line and run the rest on THIS machine.
 ssh *ARGS:
-    @{{vast}} ssh {{ARGS}}
+    @{{vast}} ssh {{quote(ARGS)}}
 
 # Re-run provisioning on the existing instance.
 provision:
@@ -60,7 +65,10 @@ push:
     #!/usr/bin/env bash
     set -euo pipefail
     read -r host port <<<"$(bash infra/vast.sh hostport)"
+    # .env carries VAST_API_KEY and HF_TOKEN -- never ship it to a rented box.
+    # provision.sh already places the tokens the box legitimately needs.
     rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude 'results' \
+      --exclude '.env' --exclude '.git' --exclude '.state' --exclude '.claude' \
       -e "ssh -p $port" ./ "root@$host:/workspace/NandaProj/"
 
 # --- local ---------------------------------------------------------------

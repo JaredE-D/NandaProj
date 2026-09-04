@@ -29,6 +29,25 @@ else
   bad "no .env" "cp .env.example .env, then fill it in"
 fi
 
+# A missing or unregistered SSH key does not surface until provisioning fails
+# on a box that is already billing. Check it here, where it costs nothing.
+echo "ssh"
+pubkey="$(ls "$HOME"/.ssh/*.pub 2>/dev/null | head -1)"
+if [ -z "$pubkey" ]; then
+  bad "no ssh key" "ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N '' , then register it with vast.ai"
+else
+  ok "local key $(basename "$pubkey")"
+  if [ -n "${VAST_API_KEY:-}" ]; then
+    fp="$(cut -d' ' -f2 <"$pubkey")"
+    if vastai show ssh-keys --raw 2>/dev/null | grep -qF -- "$fp"; then
+      ok "key registered with vast.ai"
+    else
+      bad "key not registered with vast.ai" \
+          "vastai create ssh-key \"\$(cat $pubkey)\"  -- without this, provisioning fails on a billing box"
+    fi
+  fi
+fi
+
 echo "vast.ai"
 if [ -n "${VAST_API_KEY:-}" ]; then
   if vastai show instances --raw >/dev/null 2>&1; then

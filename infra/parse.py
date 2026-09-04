@@ -78,6 +78,26 @@ def hostport(data) -> None:
     print(f"{host} {port}")
 
 
+def dph(data):
+    """The instance's real hourly rate, which differs from the offer's quote."""
+    inst = data[0] if isinstance(data, list) and data else data
+    v = inst.get("dph_total") if isinstance(inst, dict) else None
+    if v is not None:
+        print(v)
+
+
+def has_instance(data, wanted):
+    """Exit 0 if `wanted` is still on the account, 1 otherwise.
+
+    Used by `down` to confirm a destroy actually happened -- `vastai destroy`
+    aborts its own [y/N] prompt without a failing exit code, so its return
+    value proves nothing.
+    """
+    items = data if isinstance(data, list) else [data]
+    ids = {str(i.get("id")) for i in items if isinstance(i, dict)}
+    sys.exit(0 if str(wanted) in ids else 1)
+
+
 VERBS = {
     "offers": offers,
     "cheapest-id": lambda d: cheapest(d, "id"),
@@ -85,9 +105,11 @@ VERBS = {
     "new-id": new_id,
     "status": status,
     "hostport": hostport,
+    "has-instance": has_instance,
+    "dph": dph,
 }
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] not in VERBS:
-        sys.exit(f"usage: parse.py {{{'|'.join(VERBS)}}}")
-    VERBS[sys.argv[1]](load())
+    if len(sys.argv) < 2 or sys.argv[1] not in VERBS:
+        sys.exit(f"usage: parse.py {{{'|'.join(VERBS)}}} [arg]")
+    VERBS[sys.argv[1]](load(), *sys.argv[2:])

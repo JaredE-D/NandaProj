@@ -13,11 +13,23 @@ from pathlib import Path
 # --------------------------------------------------------------------------
 # Paths
 # --------------------------------------------------------------------------
-# On the remote box WORKSPACE is the persistent vast.ai volume (/workspace),
-# so the HF cache survives `just down`. Locally it falls back to the repo root.
+# On the remote box WORKSPACE is /workspace on the *instance disk*, which dies
+# with the instance -- there is no persistent volume, so weights re-download
+# each rental (~8 GB, ~5 min). Locally it falls back to the repo root.
 WORKSPACE = Path(os.environ.get("WORKSPACE", Path(__file__).resolve().parents[2]))
 HF_CACHE = WORKSPACE / "hf_cache"
 RESULTS = WORKSPACE / "results"
+
+# The repo itself, which is **not** WORKSPACE on the box: provision.sh sets
+# WORKSPACE=/workspace and `just push` rsyncs the repo to /workspace/NandaProj.
+# So caches and results sit *beside* the checkout, deliberately -- results/ is
+# excluded from the push and synced back separately, and neither survives the
+# instance. Anything that ships *with* the code (an item bank, a fixture) must
+# be found relative to REPO; deriving it from WORKSPACE resolves to
+# /workspace/data on the box and works fine locally, which is the worst kind of
+# path bug -- it only fails once a GPU is already billing.
+REPO = Path(__file__).resolve().parents[2]
+DATA = REPO / "data"
 
 
 @dataclass(frozen=True)
@@ -28,22 +40,45 @@ class ModelConfig:
     n_params: str
     dtype: str = "float32"
     gated: bool = False
+    lens_id: str | None = None  # subdir in neuronpedia/jacobian-lens, if fitted
 
     @property
     def needs_hf_token(self) -> bool:
         return self.gated
 
+    @property
+    def has_lens(self) -> bool:
+        return self.lens_id is not None
+
 
 # Ordered smallest first. Start at the top, move down only when the science
 # demands it -- iteration speed is the scarce resource in a 20-hour project.
+# PLAN2.md 4.0: debug on 270m-it, run the experiment on 4b-it, escalate to
+# 12b-it only if V2 fails (the model will not lie convincingly at 4B -- R1).
+# Instruction-tuned throughout: the -it lens, never the base one.
 PRESETS: dict[str, ModelConfig] = {
-    "tiny": ModelConfig("gpt2-small", "124M"),
-    "small": ModelConfig("gpt2-medium", "355M"),
-    "pythia": ModelConfig("pythia-160m", "160M"),
-    "gemma": ModelConfig("gemma-2-2b", "2.6B", dtype="bfloat16", gated=True),
+    "debug": ModelConfig(
+        "google/gemma-3-270m-it", "270M",
+        dtype="bfloat16", gated=True, lens_id="gemma-3-270m-it",
+    ),
+    "main": ModelConfig(
+        "google/gemma-3-1b-it", "1B",
+        dtype="bfloat16", gated=True, lens_id="gemma-3-1b-it",
+    ),
+    "target": ModelConfig(
+        "google/gemma-3-4b-it", "4B",
+        dtype="bfloat16", gated=True, lens_id="gemma-3-4b-it",
+    ),
+    "escalate": ModelConfig(
+        "google/gemma-3-12b-it", "12B",
+        dtype="bfloat16", gated=True, lens_id="gemma-3-12b-it",
+    ),
 }
 
-DEFAULT_PRESET = "tiny"
+# Debug is the default so an accidental run costs seconds, not GPU-minutes.
+DEFAULT_PRESET = "debug"
+
+LENS_REPO = "neuronpedia/jacobian-lens"
 
 
 def get_model_config(preset: str | None = None) -> ModelConfig:
