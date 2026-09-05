@@ -276,3 +276,11 @@ def test_d_paired_names_the_cause_when_no_item_carries_a_pair_id():
         pol.d_paired({"A": np.ones(4)}, {"A": np.ones(4)}, bare)
     with pytest.raises(ValueError, match="attach_meta"):
         pol.d_yesno({"A": np.ones(4)}, bare)
+
+
+def test_by_polarity_does_not_need_whole_pairs():
+    """A gated arm can hold one twin of a pair; the arms are still well defined."""
+    a = _pair("P01"); b = _pair("P02")
+    items = [a[0], b[1]]                       # one Yes-true, one No-true, no whole pair
+    split = pol.by_polarity({"P01_y": 1.0, "P02_n": 0.0}, items)
+    assert split.yes == {"P01_y": 1.0} and split.no == {"P02_n": 0.0}

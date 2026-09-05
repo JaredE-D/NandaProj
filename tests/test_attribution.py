@@ -385,3 +385,25 @@ def test_an_armed_ranking_survives_a_round_trip(tmp_path):
     rows = armed(comp, {"Y1": 8.0, "N1": 7.0})
     back = at.load_results(at.save_results(rows, tmp_path / "a.json"))
     assert at.rank(back, polarity_of=POLARITY) == at.rank(rows, polarity_of=POLARITY)
+
+
+# -- trace order -------------------------------------------------------------
+
+def test_trace_order_patches_in_model_execution_order():
+    # 05's D set in recovery order: a later layer before an earlier one, and
+    # an MLP before a head of the same layer -- both are MissedProviderError
+    # on the box if written in this order.
+    l25m = at.Component(25, at.MLP, None)
+    l19m = at.Component(19, at.MLP, None)
+    l19h2 = at.Component(19, at.HEAD, 2)
+    l19h0 = at.Component(19, at.HEAD, 0)
+    patches = {l25m: "a", l19m: "b", l19h2: "c", l19h0: "d"}
+    ordered = at.trace_order(patches)
+    assert [c for c, _ in ordered] == [l19h0, l19h2, l19m, l25m]
+    assert [v for _, v in ordered] == ["d", "c", "b", "a"]
+
+
+def test_trace_order_is_identity_for_one_or_no_patch():
+    assert at.trace_order({}) == []
+    c = at.Component(3, at.HEAD, 1)
+    assert at.trace_order({c: 7}) == [(c, 7)]

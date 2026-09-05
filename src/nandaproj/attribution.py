@@ -313,6 +313,21 @@ def hits(ranked: Sequence[Ranked]) -> list[Ranked]:
     return [r for r in ranked if r.hit]
 
 
+def trace_order(patches: Mapping) -> list[tuple[Component, object]]:
+    """`patches` as (component, value) pairs in the model's execution order.
+
+    nnsight resolves envoy accesses inside one `trace` in the order the model
+    runs them, and raises `MissedProviderError` on a module touched *after*
+    a later one. A set built from a ranking is in recovery order -- 05's D set
+    began L25M, L19M -- and patching it in that order is the crash 05 7 hit
+    at k=2. Sorted by (layer, attention-before-MLP) the same set patches
+    cleanly; a single-component patch is unchanged.
+    """
+    return sorted(patches.items(),
+                  key=lambda kv: (kv[0].layer, 0 if kv[0].kind == HEAD else 1,
+                                  -1 if kv[0].head is None else kv[0].head))
+
+
 def select_set(ordered: Sequence[Component],
                joint_recovery: Callable[[Sequence[Component]], float],
                *, target: float = SET_TARGET, k_max: int = SET_K_MAX
@@ -681,9 +696,15 @@ class Patcher:
         `logit_diff` read, so a geometry claim and a logit claim are about the
         same vector.
         """
+        # Assigned OUTSIDE the trace and filled with a plain loop inside it, the
+        # way `cache_slot` does. nnsight rewrites the body of `with lm.trace()`,
+        # and a name first bound there (a comprehension, in the first version of
+        # this method) is not visible after the block: UnboundLocalError on
+        # `saved`, on the first call, on the box.
+        saved: dict[int, object] = {}
         with self.lm.trace(prompt):
-            saved = {l: _tensor(self._envoy(f"{self.prefix}.{l}").output)[0, position].save()
-                     for l in layers}
+            for l in layers:
+                saved[l] = _tensor(self._envoy(f"{self.prefix}.{l}").output)[0, position].save()
         return {l: v.detach().float().cpu().numpy() for l, v in saved.items()}
 
     def patched_logit_diff(self, prompt: str, patches, id_honest: int, id_lie: int) -> float:
@@ -695,7 +716,7 @@ class Patcher:
         nothing is indistinguishable from a component that does not matter.
         """
         with self.lm.trace(prompt):
-            for comp, value in patches.items():
+            for comp, value in trace_order(patches):
                 if comp.kind == HEAD:
                     z = _tensor(self._envoy(self._o_proj(comp.layer)).input)
                     z[0, -1, self.head_slice(comp.head)] = value

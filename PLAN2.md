@@ -445,3 +445,17 @@ to the honest-minus-lie *difference* rather than to each logit before differenci
 
 This is a numerical-accuracy fix to how a registered quantity is computed. It does not
 change the quantity's definition, and §12.1–12.8 stand as written.
+
+## 13. Exp 4 — lying-vs-honest classifier on J-lens tokens (registered addendum)
+
+**Registered 2026-09-04**, before any capture. Spec: [`misc/exp4_spec.md`](misc/exp4_spec.md).
+Notebook: `08_jtoken_classifier`.
+
+Features are the J-lens top-K token log-probs at the answer slot, per layer, vocabulary
+built inside each CV fold; rows are the H, C1 and D passes of all 100 v2 belief items;
+the label is "this is the D row of an item the model lied on"; CV is leave-one-pair-out;
+the primary fit removes every Yes/No token from the vocabulary. Success is accuracy above
+the within-item-shuffled null p95 on the answer-masked fit, on both polarity arms, and
+transfer to the alleged arm. The logit-lens twin is reported alongside. Failure of the
+masked fit with success of the unmasked one is the expected deflationary outcome and is
+reported as such. K = 20 primary, {5, 50} as a band. No layer is pre-selected.

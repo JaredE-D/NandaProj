@@ -214,11 +214,16 @@ def by_polarity(metric: Mapping[str, float], items: Iterable[Any]) -> PolaritySp
     `l*`, a flip rate. If the two arms differ, the metric is at least partly
     about the answer token, whatever else it is about.
     """
-    index = pair_index(items)
-    yes = {item_id(y): float(metric[item_id(y)])
-           for y, _ in index.values() if item_id(y) in metric}
-    no = {item_id(n): float(metric[item_id(n)])
-          for _, n in index.values() if item_id(n) in metric}
+    # Split on each item's own declared `polarity`, not on `pair_index`: the
+    # arms are a property of the item, and requiring whole pairs here made this
+    # raise on any gated arm where twins did not survive together (05 on the
+    # alleged bank: 32 pair ids, 0 whole). Pair-level cancellation is
+    # `d_paired`'s job; this only reports the two arms.
+    items = list(items)
+    yes = {item_id(it): float(metric[item_id(it)]) for it in items
+           if _field(it, "polarity") == "Yes" and item_id(it) in metric}
+    no = {item_id(it): float(metric[item_id(it)]) for it in items
+          if _field(it, "polarity") == "No" and item_id(it) in metric}
     if not yes or not no:
         raise ValueError(
             f"metric covers {len(yes)} Yes-true and {len(no)} No-true items; "
