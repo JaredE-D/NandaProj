@@ -308,3 +308,140 @@ discovering latent knowledge; Marks & Tegmark, the geometry of truth; Zou et al.
 engineering; Goldowsky-Dill et al., detecting strategic deception with linear probes; van der Weij
 et al., sandbagging. Carried from plan 1 and already cited in the repo: 2603.25052, 2604.01457,
 2607.08046, Anthropic's Global Workspace post and the `jacobian-lens` repo.
+
+## 12. Exp 1 — direction-level causal edits (registered addendum)
+
+Spec: [`misc/exp1_spec.md`](misc/exp1_spec.md). Notebook:
+[`04b_direction_intervention.ipynb`](notebooks/04b_direction_intervention.ipynb).
+This is a **direction-level** edit at a located layer, not §4.4 — that is a *component*
+ablation over sets 05's patching has not yet produced, a different object with a different
+null. Exp 1 sits between 04 and 05, and its result changes what 05 should look for: if the
+direction is inert, ranking components by their effect on it is ranking noise.
+
+**Registered 2026-09-03, before Exp 1 data collection. Do not edit below this line.**
+
+### 12.1 Population, fixed now
+
+`legible = {PF03_apartment_mould, PF05_phone_water, SF04_password_breach, SF05_bus_brakes}`
+(4). `not_legible` = the remaining 7 gated items. Taken from 04's completed run and not
+revised after seeing any intervention result.
+
+The split needs no threshold: peak `P_J(a_H)` over readable layers under D is **1.000** for
+all four and **≤ 3e-06** for all seven, so anything in `[1e-4, 0.5]` selects the same set.
+The notebook re-derives it from the saved curves and asserts the match.
+
+### 12.2 The objects
+
+- **`d_J`** (primary) — `grad_h [ lens_logit(a_H) − lens_logit(a_D) ]` at `h_ℓ`, through the
+  lens's own readout `lm_head(final_norm(J_ℓ h))`. Per item. Autograd, not the closed form
+  `J_ℓᵀ W_Uᵀ Δe`, which drops the norm between `J_ℓ` and `W_U`.
+- **`d_DiM`** (baseline) — `mean h_ℓ(H) − mean h_ℓ(D)`, shared across items.
+- **Edits** — `ablate` (project out), `add` (`+α σ_ℓ d̂`, α in units of the layer's mean
+  residual norm), `patch` (replace the slot residual from the item's own H run).
+- **Grid** — {ablate, add} × {`d_J`, `d_DiM`} × {H, D, C2} × ℓ ∈ {16,18,20,22,24,25,26,28},
+  α ∈ {0, ±0.5, ±1, ±2, ±4, ±8}, answer slot only, plus a cumulative variant over every
+  fitted ℓ ≤ 25 and the H→D patch.
+
+### 12.3 Predicted signs
+
+| quantity | prediction |
+|---|---|
+| add `+α d_J` under D, `legible`, ℓ ∈ [20, 25] | flips a **majority** of the 4 to `a_H`, within the damage bar |
+| the same, `not_legible` | **markedly lower** — nothing legible to restore |
+| ablate `d_J` under H | drops `p_H` substantially — the direction is load-bearing |
+| ablate `d_J` under D | **little effect**, least on `not_legible`. A registered null |
+| `d_J` vs `d_DiM` | comparable or better. If `d_DiM` strictly dominates at every ℓ, the J-lens is descriptively interesting and causally redundant, and that is the honest headline |
+| `d_J` vs covariance-matched null | above, on `legible`, at ℓ ∈ [20, 25] |
+| wrong-item `d_J` | **substantially weaker** than own-item. If not, it is a Yes/No answer-token direction and must be named that |
+| D vs C2 at matched α | overlapping but not identical. If identical → **output-override**, and that is the headline |
+| layer profile | effect peaks at ℓ ≲ 25 and decays above |
+
+### 12.4 The bar, fixed before the ranking
+
+An intervention "works" if its flip rate on `legible` exceeds the **95th percentile of the
+20-draw covariance-matched null** at the same (ℓ, α) — percentile taken over per-draw flip
+rates, not over the pooled trials — **and** held-out perplexity is within 20 % of baseline,
+**and** H-condition accuracy is ≥ 90 % of baseline. All three, or it is reported as not
+working.
+
+The covariance null is estimated from residuals pooled over **all token positions** of the
+bank's prompts, not from the 11 slot residuals: an 11-vector estimate of a 2560-dimensional
+covariance is a rank-11 null and would be trivial to beat.
+
+### 12.5 What would change my mind
+
+- **Ablating `d_J` under H does nothing.** The J-lens mass is a readout epiphenomenon, not a
+  used representation. This kills the causal half of Exp 1 and is run **first**, before the
+  grid, for that reason.
+- **Wrong-item `d_J` works as well as own-item.** Not a truth direction — an answer-token
+  direction on a Yes/No bank.
+- **The covariance-matched null flips as many items.** The effect is norm and anisotropy,
+  not direction.
+- **D and C2 respond identically at every α.** No deception-specific mechanism at the
+  direction level; the object is renamed *output-override direction* throughout.
+
+### 12.6 Forking paths
+
+α, ℓ and the choice of direction are three continuous knobs over which a positive result can
+always be found. The grid in §12.2 and the bar in §12.4 are fixed here and are not extended
+after looking. Anything found outside them is a follow-up, labelled exploratory, on fresh
+items.
+
+### 12.7 Naming
+
+`d_J` is *the direction the J-lens says separates the two answer tokens at layer ℓ*. Not a
+belief, not a truth vector. Until D separates from C2, whatever moves the output is an
+**output-override direction** (§10), and "deception" is not attached to any Exp 1 result
+before that separation exists.
+
+### 12.8 n
+
+The positive subgroup is four items. No p-value on a flip rate over n=4 means anything; the
+result is a per-item table against the nulls and is reported that way.
+
+### 12.9 Amendment, 2026-09-03 — the `ablate` × `d_J` arm is void by construction
+
+**Nothing above this heading is edited.** This records a defect in the instrument, found by
+a diagnostic that measures whether the intervention was applied at all, *before* any
+outcome was interpreted.
+
+The J-lens readout `g(h) = lm_head(final_norm(J_ℓ h))` is **homogeneous of degree zero** in
+`h`: `transport` is linear and RMSNorm divides by the RMS, so `g(ch) = g(h)` for `c > 0`
+(the 1e-6 epsilon is negligible against residual norms in the thousands). Euler's theorem
+then gives `∇g · h = 0` identically. `d_J` **is** `∇g`, so `ablate(d_J)` — projecting `d_J`
+out of `h` — removes ~nothing.
+
+Measured: `|cos(d_J, h)|` ran **0.04× to 1.2×** the chance level `1/√d_model = 0.0198`
+across the layer grid, i.e. at or below what two unrelated vectors give. The observed
+`0/11` flips and `p_H drop = 0.000` under H are therefore **arithmetic, not evidence**, and
+§12.5's first bullet does **not** fire on them.
+
+**What is unaffected:** `add` × `d_J` (moving *along* a gradient is what a gradient is for),
+`ablate` × `d_DiM` (a difference-in-means vector has no orthogonality relation to `h`),
+`patch`, and the cumulative ℓ ≤ 25 edit. Two valid necessity arms were already in §12.2 and
+are untouched.
+
+**Replacement for the void arm:** `set_gap` — solve along `d̂_J` for the step that sets the
+lens gap to a target (`0` = the lens made indifferent between the two answers, `−gap` = the
+lens made to read the opposite one), reporting the step size in units of `‖h‖`. This is what
+"change what the J-lens says and see whether the answer follows" means for a scale-invariant
+readout. Its §12.3 prediction inherits the void arm's unchanged: **making the lens read the
+opposite answer under H should drop `p_H` substantially**; if it does not, §12.5's first
+bullet fires — this time on an edit that demonstrably moves the readout.
+
+This amendment changes an instrument that could not measure the registered quantity. It does
+not change any prediction, threshold, or population in §12.1–12.8.
+
+**Precision follow-up, same date.** `d_jlens` originally took the gradient through
+`unembed`, which casts its input to the lm_head's bf16; that puts ~4e-3 relative error on
+the direction — the same order as the chance cosine `1/√2560 = 0.0198`, and therefore enough
+to make the orthogonality above unmeasurable rather than merely small. It now computes the
+gradient end to end in float32 using only the two unembedding rows (`precise=True`, the
+default; `precise=False` keeps the old path for comparison). The lens's *readout* still goes
+through bf16 — that is what the lens is — but the direction the grid steers along no longer
+does. The same fix corrected `lens_gap`, which had been applying the optional logit softcap
+to the honest-minus-lie *difference* rather than to each logit before differencing, as
+`unembed` does. Gemma 3 leaves the softcap unset, so no number already produced is affected.
+
+This is a numerical-accuracy fix to how a registered quantity is computed. It does not
+change the quantity's definition, and §12.1–12.8 stand as written.

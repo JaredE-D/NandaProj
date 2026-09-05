@@ -26,6 +26,7 @@ IMAGE="${IMAGE:-vastai/pytorch:cuda-12.4.1-auto}"
 DISK_GB="${DISK_GB:-40}"
 LOCAL_PORT="${LOCAL_PORT:-8888}"
 MIN_INET="${MIN_INET:-500}"
+MIN_CUDA="${MIN_CUDA:-12.4}"
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -52,13 +53,23 @@ instance_id() { cat "$STATE/instance_id"; }
 # 148361 advertised 216 Mbit/s and delivered about 3. Raising the floor is a
 # weak filter but a free one; EXCLUDE_MACHINES is the part that actually works,
 # so add a machine_id here whenever a host turns out to be slow.
+#
+# cuda_max_good is the highest CUDA the *host driver* supports, and it must
+# cover $IMAGE or the rental is dead on arrival. Machine 13863 (driver
+# 535.230.02, cuda_max_good 12.2) was rented under the 12.4.1 image: the image
+# fell back to its forward-compatibility libs in /usr/local/cuda/compat, those
+# are only supported on data-center GPUs, and on a GeForce 4090 CUDA init died
+# with error 804 (cudaErrorCompatNotSupportedOnDevice) after provisioning had
+# already billed for the box. Filtering at search time is the only cheap place
+# to catch it -- everything downstream costs a rental.
 _query() {
   local excl=""
   for m in ${EXCLUDE_MACHINES:-}; do
     excl="$excl machine_id!=$m"
   done
   echo "gpu_name=$GPU_NAME num_gpus=1 rentable=true reliability>0.98 \
-disk_space>$DISK_GB inet_down>$MIN_INET dph<$MAX_PRICE ${GEO_FILTER:-}$excl"
+disk_space>$DISK_GB inet_down>$MIN_INET dph<$MAX_PRICE cuda_max_good>=$MIN_CUDA \
+${GEO_FILTER:-}$excl"
 }
 
 cmd_search() {
@@ -95,15 +106,21 @@ echo '$pub' >> /root/.ssh/authorized_keys && \
 sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && \
 chmod 600 /root/.ssh/authorized_keys"
 
-  $VASTAI create instance "$offer" \
+  # Capture first, write second. `> "$STATE/instance_id"` truncates the file
+  # before the pipeline runs, so a failed create used to leave an empty
+  # instance_id behind and report only "instance creation failed" -- hiding the
+  # API's actual reason, which parse.py had already printed above it.
+  local new_id
+  new_id="$($VASTAI create instance "$offer" \
     --image "$IMAGE" \
     --disk "$DISK_GB" \
     --ssh --direct \
     --onstart-cmd "$onstart" \
     --env "-e JUPYTER_TOKEN=$JUPYTER_TOKEN -e HF_TOKEN=${HF_TOKEN:-} -p 8888:8888" \
-    --raw | "$PY" "$ROOT/infra/parse.py" new-id > "$STATE/instance_id"
-
-  have_instance || die "instance creation failed"
+    --raw | "$PY" "$ROOT/infra/parse.py" new-id)" \
+    || die "create failed -- see the reason above; nothing was rented"
+  [ -n "$new_id" ] || die "create returned no instance id; nothing was rented"
+  printf '%s\n' "$new_id" > "$STATE/instance_id"
   date +%s > "$STATE/started_at"
   echo "$dph" > "$STATE/dph"
   echo ">> instance $(instance_id) created; waiting for it to come up ..."
@@ -197,7 +214,7 @@ cmd_provision() {
   read -r host port <<<"$(cmd_hostport)"
   scp -o StrictHostKeyChecking=accept-new -P "$port" \
       "$ROOT/infra/provision.sh" "$ROOT/infra/requirements-remote.txt" \
-      "$ROOT/infra/watchdog.sh" "root@$host:/root/"
+      "$ROOT/infra/watchdog.sh" "$ROOT/infra/services.sh" "root@$host:/root/"
   # shellcheck disable=SC2029
   ssh -o StrictHostKeyChecking=accept-new -p "$port" "root@$host" \
     "JUPYTER_TOKEN='$JUPYTER_TOKEN' HF_TOKEN='${HF_TOKEN:-}' \
@@ -249,7 +266,7 @@ cmd_down() {
   Or in the web console under Instances."
   fi
 
-  rm -f "$STATE/instance_id" "$STATE/started_at" "$STATE/dph"
+  rm -f "$STATE/instance_id" "$STATE/started_at" "$STATE/dph" "$STATE/stopped_at"
   echo ">> destroyed $id -- confirmed gone from the account"
 }
 
@@ -293,12 +310,149 @@ _elapsed_hours() {
   "$PY" -c "import time,sys;print((time.time()-float(open('$STATE/started_at').read()))/3600)"
 }
 
+# --- stopped instances ---------------------------------------------------
+# A *stopped* instance keeps its disk -- the venv, the HF cache (~8.6 GB of
+# gemma), /workspace -- and releases the GPU. Restarting skips the ~9 min image
+# pull, the ~4 min pip install and the model download, for roughly 1-7 c/hr of
+# storage instead of ~33 c/hr of GPU.
+#
+# Two things this buys you are not free:
+#
+#   1. Stopping is NOT a reservation. The host can rent the GPU to someone else
+#      while you are stopped, and then `start` fails. cmd_resume reports that
+#      and changes nothing -- rent a fresh box yourself if you want one.
+#   2. Nothing on a stopped box can run, so nothing on the box can ever restart
+#      it, reap it, or sync results off it. Both are local-side jobs.
+#
+# Hence the reaper below. The watchdog stops an idle box; if nobody resumes it
+# within STOPPED_MAX_H, this destroys it, so the bill still reaches zero on its
+# own. Its clock starts when a local command first *observes* the stopped state,
+# not when the watchdog stopped it -- a stopped box is unreachable and vast does
+# not report a stop time. That errs toward paying a few more cents of storage,
+# never toward destroying early.
+#
+# THE CATCH, and it is a real one: results written since the last sync live on
+# that disk and die with it. `just stop` syncs first for exactly this reason;
+# a watchdog-initiated stop cannot, so `just status` warns while the clock runs.
+STOPPED_MAX_H="${STOPPED_MAX_H:-24}"
+
+_instance_state() {
+  $VASTAI show instance "$(instance_id)" --raw 2>/dev/null \
+    | "$PY" "$ROOT/infra/parse.py" cur-state || true
+}
+
+_reap_stopped() {
+  have_instance || return 0
+  local state now first age_h
+  state="$(_instance_state)"
+  case "$state" in
+    stopped|exited)
+      now=$(date +%s)
+      if [ ! -s "$STATE/stopped_at" ]; then
+        echo "$now" > "$STATE/stopped_at"
+        echo ">> instance $(instance_id) is $state; storage-billing clock starts now"
+      fi
+      first="$(cat "$STATE/stopped_at")"
+      age_h="$("$PY" -c "print(($now-$first)/3600)")"
+      if "$PY" -c "import sys; sys.exit(0 if float('$age_h') >= float('$STOPPED_MAX_H') else 1)"; then
+        echo ">> stopped for ${age_h%%.*}h (limit ${STOPPED_MAX_H}h) -- destroying $(instance_id)."
+        echo "   Any results not synced before it stopped are gone with the disk."
+        cmd_burn_record
+        yes 2>/dev/null | $VASTAI destroy instance "$(instance_id)" || true
+        rm -f "$STATE/instance_id" "$STATE/started_at" "$STATE/dph" "$STATE/stopped_at"
+        echo ">> reaped."
+      else
+        "$PY" - "$age_h" "$STOPPED_MAX_H" <<'PYEOF'
+import sys
+age, limit = float(sys.argv[1]), float(sys.argv[2])
+print(f"   stopped {age:.1f}h ago; auto-destroy in {limit-age:.1f}h "
+      f"('just resume' to keep it, 'just down' to end it now)")
+PYEOF
+      fi
+      ;;
+    *)
+      # Running again (or gone): the stop clock no longer applies.
+      rm -f "$STATE/stopped_at"
+      ;;
+  esac
+}
+
+# Stop without destroying. Syncs first: the reaper may later destroy this disk
+# and nothing can be pulled off a stopped box.
+cmd_stop() {
+  have_instance || { echo "no instance to stop"; return 0; }
+  echo ">> syncing results/ before stopping $(instance_id) ..."
+  if ! cmd_sync; then
+    die "sync failed -- nothing was stopped.
+  A stopped box cannot be synced, and the reaper destroys it after ${STOPPED_MAX_H}h,
+  so stopping now would put results on a disk with a deadline and no way off it.
+  Fix the connection and retry, or 'just down --force' to give up on the box."
+  fi
+  $VASTAI stop instance "$(instance_id)" || die "stop failed"
+  date +%s > "$STATE/stopped_at"
+  echo ">> stopped $(instance_id). Storage still bills (~1-7 c/hr); GPU does not."
+  echo ">> 'just resume' to bring it back, or it self-destroys in ${STOPPED_MAX_H}h."
+}
+
+# Start a stopped instance and restart its services. The disk survived a stop,
+# but every process on it died, so jupyter and the watchdog need relaunching --
+# services.sh, not provision.sh, because the packages are already installed.
+cmd_resume() {
+  have_instance || die "no instance to resume -- 'just up' rents a new one"
+  local state
+  state="$(_instance_state)"
+  if [ "$state" = "running" ]; then
+    echo ">> instance $(instance_id) is already running"
+  else
+    echo ">> starting $(instance_id) ..."
+    if ! $VASTAI start instance "$(instance_id)"; then
+      die "start failed -- the host has most likely rented the GPU to someone else.
+  Stopping is not a reservation. Nothing has been changed or destroyed; the disk
+  is still there and still billing storage. Your options:
+    just status               # is it still stopped, and how long until it reaps?
+    just down                 # give up on this box (results are NOT recoverable
+                              #   from a stopped disk -- it must start to sync)
+    just up                   # rent a fresh box (only after 'just down')"
+    fi
+  fi
+  rm -f "$STATE/stopped_at"
+  # Billing restarts, so the burn clock does too; the stopped hours were storage
+  # and are not what `just burn` is estimating.
+  date +%s > "$STATE/started_at"
+  cmd_wait
+  echo ">> restarting jupyter and the watchdog ..."
+  cmd_services
+  echo ">> resumed. 'just tunnel' to reconnect."
+}
+
+cmd_services() {
+  have_instance || die "no instance"
+  local host port
+  read -r host port <<<"$(cmd_hostport)"
+  # shellcheck disable=SC2029
+  ssh -o StrictHostKeyChecking=accept-new -p "$port" "root@$host" \
+    "JUPYTER_TOKEN='$JUPYTER_TOKEN' VAST_API_KEY='$VAST_API_KEY' \
+     INSTANCE_ID='$(instance_id)' IDLE_KILL_MIN='$IDLE_KILL_MIN' \
+     bash /root/services.sh"
+}
+
 cmd_status() {
+  _reap_stopped
   if ! have_instance; then
     echo "no instance running -- \$0.00/hr"
     cmd_burn
     return 0
   fi
+  local st
+  st="$(_instance_state)"
+  case "$st" in
+    stopped|exited)
+      echo "instance $(instance_id): $st (GPU released, storage still billing)"
+      echo "   results written since the last sync are on that disk only"
+      cmd_burn
+      return 0
+      ;;
+  esac
   local hrs dph
   hrs="$(_elapsed_hours)"; dph="$(cat "$STATE/dph")"
   "$PY" - "$hrs" "$dph" "$(instance_id)" <<'PYEOF'
@@ -373,6 +527,9 @@ case "${1:-}" in
   status)     shift; cmd_status "$@" ;;
   burn)       shift; cmd_burn "$@" ;;
   balance)    shift; cmd_balance "$@" ;;
+  stop)       shift; cmd_stop "$@" ;;
+  resume)     shift; cmd_resume "$@" ;;
+  services)   shift; cmd_services "$@" ;;
   down)       shift; cmd_down "$@" ;;
   *) echo "usage: vast.sh {search|up|adopt|wait|provision|ssh|tunnel|hostport|sync|status|burn|balance|down}" >&2; exit 2 ;;
 esac

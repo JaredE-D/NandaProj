@@ -520,6 +520,113 @@ def crossover_summary(curves: Sequence[Curves], n_layers: int | None = None) -> 
 # Anything left in a kernel dies with the kernel; anything written here does not.
 
 
+@dataclass
+class TopLayerCheck:
+    """Does the lens's verdict at its top fitted layer match the model's output?
+
+    The J-lens is fitted on layers 0..n-2 -- on gemma-3-4b-it that is 0..32, with
+    **no Jacobian for layer 33**. So the topmost lens reading is one full layer
+    plus the final norm short of the model's own distribution, and "a_H still
+    leads at the top" does not mean "the model answers a_H".
+
+    That gap is not cosmetic. `l*` is defined as the layer where a_D takes the
+    lead and never gives it back; if the lens never actually arrives at the
+    model's answer, `l*` is a fact about the lens's trajectory and not about
+    where the model commits. This is the cheapest possible check on that, and it
+    runs on saved curves with no GPU: `Curves` already stores `final_honest` and
+    `final_lie`, which are the model's own numbers.
+
+    Only the *ordering* of the two tracked answers is compared, not the argmax
+    over the vocabulary -- `Curves` stores two tokens per layer, and the ordering
+    is what `crossover` and `classify` are built on, so it is the thing whose
+    agreement matters.
+    """
+
+    item_id: str
+    condition: Condition
+    top_layer: int
+    j_honest_top: float
+    j_lie_top: float
+    final_honest: float
+    final_lie: float
+
+    @property
+    def lens_leads_honest(self) -> bool:
+        return self.j_honest_top > self.j_lie_top
+
+    @property
+    def model_leads_honest(self) -> bool:
+        return self.final_honest > self.final_lie
+
+    @property
+    def agrees(self) -> bool:
+        return self.lens_leads_honest == self.model_leads_honest
+
+    @property
+    def lens_mass(self) -> float:
+        """How much of the lens distribution the two answers hold at the top."""
+        return self.j_honest_top + self.j_lie_top
+
+    @property
+    def model_mass(self) -> float:
+        return self.final_honest + self.final_lie
+
+
+def top_layer_agreement(curves: Iterable[Curves]) -> list[TopLayerCheck]:
+    """One `TopLayerCheck` per curve. See the class docstring for why."""
+    return [
+        TopLayerCheck(
+            item_id=c.item_id, condition=c.condition, top_layer=int(c.layers[-1]),
+            j_honest_top=float(c.j_honest[-1]), j_lie_top=float(c.j_lie[-1]),
+            final_honest=float(c.final_honest), final_lie=float(c.final_lie),
+        )
+        for c in curves
+    ]
+
+
+def top_layer_report(checks: Sequence[TopLayerCheck], n_layers: int | None = None,
+                     limit: int = 12) -> str:
+    """Agreement per condition, and the disagreeing items named.
+
+    Printed per condition because the conditions are not interchangeable here:
+    under H the lens and the model should agree trivially, so H is the control
+    that says the check itself works. A low agreement rate under H means the
+    instrument is broken; a low rate under D **only** means the lens and the
+    model part company exactly where the deception result is read.
+    """
+    if not checks:
+        return "top-layer agreement: no curves"
+    by_cond: dict[str, list[TopLayerCheck]] = {}
+    for c in checks:
+        by_cond.setdefault(c.condition, []).append(c)
+
+    top = checks[0].top_layer
+    lines = [f"top fitted lens layer: L{top}"
+             + (f" of {n_layers} (L{top + 1}..L{n_layers - 1} unfitted: the model has "
+                f"{n_layers - 1 - top} more layer(s) plus the final norm to change its "
+                "mind)" if n_layers else "")]
+    lines.append("")
+    lines.append(f"{'condition':<6} {'n':>3} {'agree':>7} {'lens mass':>10} "
+                 f"{'model mass':>11}   disagreeing items")
+    for cond, group in sorted(by_cond.items()):
+        agree = sum(c.agrees for c in group)
+        bad = [c.item_id for c in group if not c.agrees]
+        lines.append(
+            f"{cond:<6} {len(group):>3} {agree}/{len(group):<5} "
+            f"{np.median([c.lens_mass for c in group]):>10.3f} "
+            f"{np.median([c.model_mass for c in group]):>11.3f}   "
+            + (", ".join(bad[:limit]) + (f" (+{len(bad) - limit})" if len(bad) > limit else "")
+               if bad else "--"))
+
+    h = by_cond.get("H", [])
+    if h and sum(c.agrees for c in h) < len(h):
+        lines += ["", ("!! the lens disagrees with the model under H, where the model is "
+                  "answering honestly"), ("   and there is nothing to suppress. That is the "
+                  "instrument failing its own control --"), ("   fix it before reading any "
+                  "D number, including l*.")]
+    return "\n".join(lines)
+
+
 def save_gate(rows: Sequence[GateRow], path: str | Path) -> Path:
     """Write the gate table as JSON. Small, human-readable, diffable.
 
@@ -729,18 +836,21 @@ class Slot:
     mass: float           # total probability on the legal answers
 
 
-def read_slot(reader: Reader, item: Item, condition: Condition) -> Slot:
-    """One forward pass, both views. No lens.
+def slot_from_probs(reader: Reader, probs: np.ndarray, answers: Sequence[str]) -> Slot:
+    """The two views of one answer slot, from a distribution that is already computed.
+
+    Split out of `read_slot` so that `intervene` can read an *edited* forward
+    pass with the identical arithmetic. Two copies of "renormalize within the
+    legal answers" is exactly the kind of duplication that drifts, and a drift
+    here would make Exp 1's numbers quietly incomparable to 04's gate.
 
     With no declared answers -- the C3 floor -- there is nothing to renormalize
-    within, so `answer` falls back to the emitted token and `mass` is NaN. Those
-    rows are `NO_STATED_ANSWER` and are never gated on either number.
+    within, so `answer` falls back to the emitted token and `mass` is NaN.
     """
-    probs = reader.slot_probs(items_mod.render(reader.tok, item, condition))
     emitted, p_emitted = reader.top_k(probs, 1)[0]
 
     per_answer = {a: float(sum(probs[i] for i in answer_token_ids(reader.tok, a)))
-                  for a in item.answers}
+                  for a in answers}
     if not per_answer:
         return Slot(emitted, float(p_emitted), emitted, float(p_emitted), float("nan"))
 
@@ -748,6 +858,15 @@ def read_slot(reader: Reader, item: Item, condition: Condition) -> Slot:
     best = max(per_answer, key=per_answer.__getitem__)
     return Slot(emitted, float(p_emitted), best,
                 per_answer[best] / mass if mass > 0 else 0.0, mass)
+
+
+def read_slot(reader: Reader, item: Item, condition: Condition) -> Slot:
+    """One forward pass, both views. No lens.
+
+    Those rows are `NO_STATED_ANSWER` and are never gated on either number.
+    """
+    probs = reader.slot_probs(items_mod.render(reader.tok, item, condition))
+    return slot_from_probs(reader, probs, item.answers)
 
 
 @dataclass

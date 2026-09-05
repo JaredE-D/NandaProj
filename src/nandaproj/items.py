@@ -513,6 +513,14 @@ def to_json(result: LoadResult | Iterable[Item], path: str | Path) -> Path:
             "answer_prefix": i.answer_prefix,
             "tier": i.tier,
             "harm": i.harm,
+            # Round-tripped from `meta`, not dropped. These are bank facts, not
+            # measurements: `pair_id` is what makes an item half of a polarity
+            # pair, and 04b/05 load *this* file rather than the source bank. A
+            # gated bank without them silently has no pairs at all, which
+            # surfaces downstream as "mean of no vectors" from `d_paired` --
+            # a long way from the line that caused it.
+            **{k: i.meta[k] for k in ("pair_id", "polarity", "inverted_question")
+               if i.meta.get(k) is not None},
             "prompts": {c: {"system": p.system, "user": p.user}
                         for c, p in i.prompts.items()},
         }
@@ -522,6 +530,20 @@ def to_json(result: LoadResult | Iterable[Item], path: str | Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2))
     return path
+
+
+def attach_meta(target: Iterable[Item], source: Iterable[Item]) -> list[Item]:
+    """`target` items with any `meta` keys they lack filled in from `source`.
+
+    For reading a *gated* bank written before `to_json` round-tripped `pair_id`:
+    the gated file carries the answers the model actually gave, which is what
+    makes it the right file to load, and the source bank carries the static
+    fields. Matching is by `item_id`; the target's own meta always wins, so a
+    measured value is never overwritten by the bank's guess, and an item absent
+    from `source` passes through untouched.
+    """
+    by_id = {i.item_id: i.meta for i in source}
+    return [replace(i, meta={**by_id.get(i.item_id, {}), **i.meta}) for i in target]
 
 
 # --------------------------------------------------------------------------
@@ -664,7 +686,7 @@ def report(problems: Sequence[Problem], limit: int = 20) -> str:
 
 # `config.DATA`, not `config.WORKSPACE`: the bank ships with the code, and on
 # the box WORKSPACE is /workspace while the checkout is /workspace/NandaProj.
-BANK = config.DATA / "deception_bank_export_v1.json"
+BANK = config.DATA / "deception_bank_export_v2.json"
 
 
 def load_bank(path: str | Path = BANK) -> LoadResult:

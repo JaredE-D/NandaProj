@@ -26,8 +26,9 @@ that needs it (`score_candidates`) imports inside the body.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal
+from typing import Any, Literal
 
 import numpy as np
 

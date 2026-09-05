@@ -270,3 +270,44 @@ def test_the_shipped_bank_loads_with_nothing_synthesised():
     assert len(bank) > 0
     assert bank.used_templates == []
     assert {i.is_no_belief for i in bank} == {True, False}   # both kinds present
+
+
+# --------------------------------------------------------------------------
+# The gated-bank round trip (04 -> 04b/05)
+# --------------------------------------------------------------------------
+
+
+def test_to_json_round_trips_pair_id_and_polarity(tmp_path):
+    """04 writes the gated bank with to_json and 04b loads it. Dropping pair_id
+    there left 04b with zero pairs and a `mean of no vectors` five frames away."""
+    bank = items.load_bank()
+    out = items.to_json(bank.items, tmp_path / "gated.json")
+    back = items.load(out, conditions=None)
+    for before in bank.items:
+        after = back.by_id[before.item_id]
+        assert after.meta.get("pair_id") == before.meta.get("pair_id"), before.item_id
+        assert after.meta.get("polarity") == before.meta.get("polarity")
+        assert after.meta.get("inverted_question") == before.meta.get("inverted_question")
+
+
+def test_to_json_round_trip_keeps_the_pairs_resolvable(tmp_path):
+    from nandaproj import polarity
+
+    bank = items.load_bank()
+    back = items.load(items.to_json(bank.items, tmp_path / "g.json"), conditions=None)
+    assert len(polarity.pair_index(back.items)) == 50
+
+
+def test_attach_meta_fills_gaps_without_overwriting_measurements():
+    source = [items.Item(item_id="A", question="q?", meta={"pair_id": "P", "tier": "x"})]
+    target = [items.Item(item_id="A", question="q?", answer_honest=" No",
+                         meta={"tier": "measured"})]
+    merged = items.attach_meta(target, source)[0]
+    assert merged.meta["pair_id"] == "P"          # filled in from the bank
+    assert merged.meta["tier"] == "measured"      # the target's own value wins
+    assert merged.answer_honest == " No"          # measurements untouched
+
+
+def test_attach_meta_passes_through_items_absent_from_source():
+    target = [items.Item(item_id="ZZ", question="q?", meta={"a": 1})]
+    assert items.attach_meta(target, [])[0].meta == {"a": 1}

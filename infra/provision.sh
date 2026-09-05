@@ -65,43 +65,11 @@ else:
     raise SystemExit("CUDA not available -- wrong image or a bad host; destroy and retry")
 PYEOF
 
-# --- jupyter -------------------------------------------------------------
-# Bind to loopback only. The sole way in is the SSH tunnel, so the token is
-# never exposed to the public internet.
-mkdir -p /root/.jupyter
-cat > /root/.jupyter/jupyter_lab_config.py <<EOF
-c.ServerApp.ip = "127.0.0.1"
-c.ServerApp.port = 8888
-c.ServerApp.open_browser = False
-c.ServerApp.allow_root = True
-c.ServerApp.root_dir = "$WORKSPACE"
-c.IdentityProvider.token = "${JUPYTER_TOKEN}"
-c.ServerApp.terminado_settings = {"shell_command": ["/bin/bash"]}
-EOF
+# --- long-running services ----------------------------------------------
+# jupyter + watchdog live in services.sh so that `just resume` can restart them
+# on a stopped-and-started box without repeating the pip install above.
+WORKSPACE="$WORKSPACE" IDLE_KILL_MIN="$IDLE_KILL_MIN" \
+  JUPYTER_TOKEN="$JUPYTER_TOKEN" VAST_API_KEY="$VAST_API_KEY" \
+  INSTANCE_ID="$INSTANCE_ID" bash /root/services.sh
 
-pkill -f "jupyter-lab" 2>/dev/null || true
-sleep 2
-# Must be the venv's jupyter: a system jupyter would launch a kernel with no torch.
-nohup "$VENV_BIN/jupyter" lab > /var/log/jupyter.log 2>&1 &
-
-# Register the venv as the kernel the notebooks get, by name.
-"$VENV_PY" -m ipykernel install --name nandaproj --display-name "NandaProj (GPU)" >/dev/null 2>&1 || true
-
-echo ">> waiting for jupyter"
-for _ in $(seq 1 30); do
-  if curl -sf -H "Authorization: token $JUPYTER_TOKEN" \
-       127.0.0.1:8888/api >/dev/null 2>&1; then
-    echo "   jupyter is up"
-    break
-  fi
-  sleep 2
-done
-
-# --- idle watchdog -------------------------------------------------------
-pkill -f "watchdog.sh" 2>/dev/null || true
-JUPYTER_TOKEN="$JUPYTER_TOKEN" VAST_API_KEY="$VAST_API_KEY" \
-  INSTANCE_ID="$INSTANCE_ID" IDLE_KILL_MIN="$IDLE_KILL_MIN" \
-  nohup bash /root/watchdog.sh > /var/log/watchdog.log 2>&1 &
-
-echo ">> provisioned. jupyter log: /var/log/jupyter.log"
-echo ">> watchdog will self-destroy after ${IDLE_KILL_MIN} min of kernel idleness"
+echo ">> provisioned."

@@ -26,7 +26,6 @@ if os.path.exists("../../../"):
 
 from nandaproj import config
 
-
 # Dataset names
 DATASETS = Literal["mmlu", "triviaqa"]
 CONDITIONS = ["P1_separate", "P2_joint", "P3_introspective", "P4_third_person", "P5_deferred"]

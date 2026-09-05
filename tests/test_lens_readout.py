@@ -565,3 +565,68 @@ def test_saving_an_empty_sweep_does_not_raise(tmp_path):
     """A sweep that dies before its first item should leave a readable file,
     not a half-written one."""
     assert lr.load_curves(lr.save_curves([], tmp_path / "empty.npz")) == []
+
+
+# --------------------------------------------------------------------------
+# A: does the lens's top fitted layer agree with the model's output? (exp1b gate)
+# --------------------------------------------------------------------------
+
+
+def _curve(item_id, condition, j_top, l_top, final_h, final_l, layers=(30, 31, 32)):
+    n = len(layers)
+    return lr.Curves(
+        item_id=item_id, condition=condition, layers=list(layers),
+        answer_honest=" Yes", answer_lie=" No",
+        j_honest=np.array([0.0] * (n - 1) + [j_top]),
+        j_lie=np.array([0.0] * (n - 1) + [l_top]),
+        l_honest=np.zeros(n), l_lie=np.zeros(n),
+        final_honest=final_h, final_lie=final_l,
+    )
+
+
+def test_agreement_when_lens_and_model_pick_the_same_answer():
+    c = lr.top_layer_agreement([_curve("A", "D", 0.9, 0.05, 0.8, 0.1)])[0]
+    assert (c.lens_leads_honest, c.model_leads_honest, c.agrees) == (True, True, True)
+    assert c.top_layer == 32
+
+
+def test_disagreement_is_flagged_when_the_lens_leads_honest_but_the_model_lies():
+    """The 8 `leads_at_top` items under D: lens says a_H, model emitted a_D."""
+    c = lr.top_layer_agreement([_curve("A", "D", 0.9, 0.05, 0.02, 0.95)])[0]
+    assert c.lens_leads_honest and not c.model_leads_honest
+    assert not c.agrees
+
+
+def test_mass_is_reported_for_both_lens_and_model():
+    c = lr.top_layer_agreement([_curve("A", "D", 0.6, 0.3, 0.5, 0.4)])[0]
+    assert c.lens_mass == pytest.approx(0.9)
+    assert c.model_mass == pytest.approx(0.9)
+
+
+def test_report_counts_agreement_per_condition():
+    checks = lr.top_layer_agreement([
+        _curve("A", "H", 0.9, 0.05, 0.9, 0.05),
+        _curve("B", "H", 0.9, 0.05, 0.9, 0.05),
+        _curve("A", "D", 0.9, 0.05, 0.02, 0.95),     # disagrees
+        _curve("B", "D", 0.05, 0.9, 0.02, 0.95),
+    ])
+    text = lr.top_layer_report(checks, n_layers=34)
+    assert "top fitted lens layer: L32 of 34" in text
+    assert "1 more layer(s)" in text
+    assert "2/2" in text and "1/2" in text
+    assert "A" in text.split("D ")[-1]
+
+
+def test_report_shouts_when_the_control_condition_disagrees():
+    """H disagreeing means the check itself is broken, not that D is interesting."""
+    checks = lr.top_layer_agreement([_curve("A", "H", 0.9, 0.05, 0.02, 0.95)])
+    assert "instrument failing its own control" in lr.top_layer_report(checks)
+
+
+def test_report_is_quiet_when_the_control_is_clean():
+    checks = lr.top_layer_agreement([_curve("A", "H", 0.9, 0.05, 0.9, 0.02)])
+    assert "instrument failing" not in lr.top_layer_report(checks)
+
+
+def test_report_handles_no_curves():
+    assert "no curves" in lr.top_layer_report([])

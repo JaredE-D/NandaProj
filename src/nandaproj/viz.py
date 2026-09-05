@@ -169,3 +169,52 @@ def grouped_bar(
     if len(series) < 2:
         fig.update_layout(showlegend=False)
     return fig
+
+
+def scatter(
+    x,
+    y,
+    labels,
+    title: str = "",
+    xaxis: str = "",
+    yaxis: str = "",
+    text=None,
+    symbols=None,
+):
+    """One point per row, coloured by `labels` -- for PCA scores.
+
+    Colour is one encoding and `symbols` is the second, so two labellings can be
+    read off the same plot: colour the condition and shape the polarity, and a
+    cloud that separates by shape rather than by colour is visible as such
+    rather than needing a second figure. `text` goes into the hover, which is
+    where item ids belong -- printed on the plot they cover the geometry.
+
+    Note what this cannot do: a scatter plot cannot say whether the separation
+    is the label or something correlated with it. `geometry.eta_squared` is the
+    number that can, and it is printed beside every one of these.
+    """
+    import plotly.graph_objects as go
+
+    names = list(dict.fromkeys(labels))
+    if len(names) > len(SERIES):
+        raise ValueError(f"{len(names)} label values exceeds the {len(SERIES)} colours")
+    marks = list(symbols) if symbols is not None else None
+    shapes = ("circle", "diamond", "square", "x")
+
+    fig = go.Figure()
+    xs, ys = list(_to_numpy(x)), list(_to_numpy(y))
+    for slot, name in enumerate(names):
+        idx = [i for i, lab in enumerate(labels) if lab == name]
+        marker = {"size": 9, "color": SERIES[slot], "line": {"width": 0}}
+        if marks is not None:
+            kinds = list(dict.fromkeys(marks))
+            marker["symbol"] = [shapes[kinds.index(marks[i]) % len(shapes)] for i in idx]
+        fig.add_trace(go.Scatter(
+            x=[xs[i] for i in idx], y=[ys[i] for i in idx],
+            mode="markers", name=str(name), marker=marker,
+            text=[str(text[i]) for i in idx] if text is not None else None,
+            hovertemplate=(f"{name}<br>%{{text}}<br>%{{x:.2f}}, %{{y:.2f}}<extra></extra>"
+                           if text is not None
+                           else f"{name}<br>%{{x:.2f}}, %{{y:.2f}}<extra></extra>"),
+        ))
+    return _style(fig, title, xaxis, yaxis)

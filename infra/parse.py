@@ -53,14 +53,41 @@ def cheapest(data, field: str) -> None:
 
 
 def new_id(data) -> None:
-    """`create instance --raw` returns {"success": true, "new_contract": N}."""
+    """`create instance --raw` returns {"success": true, "new_contract": N}.
+
+    On failure vast puts the reason in "error"/"msg"; the raw dict is unreadable
+    on a terminal, and the reason is the only part that decides what to do next.
+    "no_such_ask" means the offer was rented by someone else between our search
+    and our create -- retry, do not debug. An insufficient-balance message means
+    top up. Anything else is worth reading in full, so the dict is kept last.
+    """
     if not data or not data.get("success"):
-        sys.exit(f"create failed: {data}")
+        err = str(data.get("error") or "") if isinstance(data, dict) else ""
+        msg = str(data.get("msg") or "") if isinstance(data, dict) else ""
+        hint = ""
+        if "no_such_ask" in err or "no_such_ask" in msg:
+            hint = ("\n  the offer was taken between search and create -- "
+                    "just up again, it picks the next cheapest")
+        elif "balance" in msg.lower() or "credit" in msg.lower():
+            hint = "\n  out of credit -- 'just balance', then top up vast.ai"
+        sys.exit(f"create failed: {err or 'unknown'} {msg}{hint}\n  raw: {data}")
     print(data["new_contract"])
 
 
 def status(data) -> None:
     print(as_instance(data).get("actual_status") or "pending")
+
+
+def cur_state(data) -> None:
+    """The lifecycle state: running / stopped / created.
+
+    Distinct from `status` (actual_status), which describes what the container
+    is doing -- "loading" while it pulls the image, "exited" once stopped. Only
+    cur_state distinguishes "stopped, GPU released, storage billing" from
+    "booting, GPU billing", and confusing the two either bills you for a box you
+    think is off or reaps one that is merely slow to start.
+    """
+    print(as_instance(data).get("cur_state") or "unknown")
 
 
 def hostport(data) -> None:
@@ -104,6 +131,7 @@ VERBS = {
     "cheapest-price": lambda d: cheapest(d, "price"),
     "new-id": new_id,
     "status": status,
+    "cur-state": cur_state,
     "hostport": hostport,
     "has-instance": has_instance,
     "dph": dph,
