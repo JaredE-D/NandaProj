@@ -45,6 +45,13 @@ Some specifics:
   cell). The same score from the logit lens: 0.72. Almost all of it is the single token
   ` Incorrect` (0.95 alone; `error` 0.85). **Without labels, the J-lens beats the logit lens
   here — the one place in this project where the J-lens did something a simpler tool did not.**
+- **It does not transfer (pre-registered, frozen word list and depth).** Qwen3-14B almost
+  never lies under the same prompt (5 robust lies: not evaluable). On Llama-3.1-8B-Instruct
+  (76 lies) the zero-shot score is 0.41 AUROC at the frozen layer: there `FALSE`/`False`
+  track the answer's *meaning*, not the lie. Trained on labels, the masked J-lens still reads
+  Llama's lies at 0.90 [0.87, 0.93] (best baseline 0.76) — but so does the logit lens (0.90).
+  The training-free monitor is a gemma-3-12b-it result.
+  ([`misc/results_xmodel.md`](misc/results_xmodel.md))
 
 - **Steering is null.** Adding or subtracting the cross-fitted lie direction (up to ~80% of the
   residual norm, slot or every position, L30/L42) changes the answer no more than a random
@@ -78,7 +85,8 @@ Instructed/persona lying only: one model, one hand-built bank, 70 lied items. Th
 uses stake, which may be weaker than the model's own answer, so "truth XOR intended answer is
 linearly readable" is narrowed (by the pre-answer result) but not excluded. The J-lens token
 list is descriptive and noisy (some lie words weight honest). The zero-shot word list was written
-after seeing the fitted tokens (` Incorrect` among them), so it is not blind, and it is one model.
+after seeing the fitted tokens (` Incorrect` among them), so it is not blind, and it failed its
+pre-registered transfer test to a second family.
 The PCA-16 probe, the zero-shot score and all steering beyond slot L42 are post hoc. Closest prior work: Long et al., arXiv 2507.22149.
 
 **Next:** does a detector trained on instructed lies catch *spontaneous* ones (e.g. sycophantic

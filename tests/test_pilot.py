@@ -143,3 +143,25 @@ def test_robust_labels_separate_mapping_flips_from_stable_outcomes(v2):
     assert pilot.robust_labels(rows, items) == {stable_lie.item.item_id: "lied",
                                                 stable_honest.item.item_id: "honest",
                                                 flip.item.item_id: "flips"}
+
+
+def test_render_turns_qwen_thinking_off_and_ends_at_the_answer_prefix(v2):
+    seen = {}
+
+    class FakeTok:
+        def apply_chat_template(self, chat, tokenize, add_generation_prompt, **kwargs):
+            seen.update(kwargs)
+            return "<rendered>"
+
+    out = pilot.render(FakeTok(), v2[0].item, "D", "ab_yesA")
+    assert seen == {"enable_thinking": False}
+    assert out == "<rendered>" + deception.ANSWER_PREFIX
+
+
+def test_lens_paths_for_gemma_and_qwen_presets():
+    from nandaproj import config
+
+    assert config.get_model_config("escalate").lens_path == \
+        "gemma-3-12b-it/jlens/Salesforce-wikitext/gemma-3-12b-it_jacobian_lens.pt"
+    assert config.get_model_config("qwen14b").lens_path == \
+        "qwen3-14b/jlens/Salesforce-wikitext/Qwen3-14B_jacobian_lens.pt"

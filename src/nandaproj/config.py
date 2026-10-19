@@ -41,6 +41,12 @@ class ModelConfig:
     dtype: str = "float32"
     gated: bool = False
     lens_id: str | None = None  # subdir in neuronpedia/jacobian-lens, if fitted
+    lens_file: str | None = None  # file in that subdir; Gemma's is `<lens_id>_jacobian_lens.pt`
+
+    @property
+    def lens_path(self) -> str:
+        """Path of the lens file inside `LENS_REPO`."""
+        return f"{self.lens_id}/jlens/Salesforce-wikitext/{self.lens_file or f'{self.lens_id}_jacobian_lens.pt'}"
 
     @property
     def needs_hf_token(self) -> bool:
@@ -72,6 +78,20 @@ PRESETS: dict[str, ModelConfig] = {
     "escalate": ModelConfig(
         "google/gemma-3-12b-it", "12B",
         dtype="bfloat16", gated=True, lens_id="gemma-3-12b-it",
+    ),
+    # Cross-model test (misc/prereg_xmodel_qwen14b.md). The lens file is mixed-case.
+    "qwen14b": ModelConfig(
+        "Qwen/Qwen3-14B", "14B",
+        dtype="bfloat16", gated=False, lens_id="qwen3-14b",
+        lens_file="Qwen3-14B_jacobian_lens.pt",
+    ),
+    # The one alternate after Qwen3-14B's gate failed (misc/prereg_xmodel_qwen14b.md).
+    # unsloth's ungated mirror of meta-llama/Llama-3.1-8B-Instruct: Meta's gate is a
+    # manual review that does not fit the deadline. The lens was fit on Meta's copy.
+    "llama8b": ModelConfig(
+        "unsloth/Llama-3.1-8B-Instruct", "8B",
+        dtype="bfloat16", gated=False, lens_id="llama3.1-8b-it",
+        lens_file="Llama-3.1-8B-Instruct_jacobian_lens.pt",
     ),
 }
 

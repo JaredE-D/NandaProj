@@ -111,7 +111,7 @@ class Reader:
 
         lens = jlens.JacobianLens.from_pretrained(
             lens_repo or config.LENS_REPO,
-            filename=f"{cfg.lens_id}/jlens/Salesforce-wikitext/{cfg.lens_id}_jacobian_lens.pt",
+            filename=cfg.lens_path,
         )
         return cls(model, tok, lens, jlens.from_hf(model, tok), **kwargs)
 

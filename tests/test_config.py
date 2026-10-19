@@ -20,16 +20,24 @@ def test_all_gemma_presets_are_gated():
     # Every Gemma repo is gated; forgetting HF_TOKEN fails *after* billing
     # starts, so the flag must be set on all of them.
     for name, cfg in config.PRESETS.items():
-        assert cfg.needs_hf_token, f"{name} not marked gated"
         assert cfg.dtype == "bfloat16", f"{name} should be bf16"
+        if cfg.name.startswith("google/"):
+            assert cfg.needs_hf_token, f"{name} not marked gated"
 
 
 def test_every_preset_has_an_instruction_tuned_lens():
-    # PLAN2.md 4.0: use the -it lens, never the base one.
+    # PLAN2.md 4.0: use the -it lens, never the base one. Gemma marks the chat
+    # model "-it"; Qwen3 marks the *base* model "-Base" and leaves the chat model bare.
     for name, cfg in config.PRESETS.items():
         assert cfg.has_lens, f"{name} has no lens_id"
-        assert cfg.lens_id.endswith("-it"), f"{name} lens is not -it: {cfg.lens_id}"
-        assert cfg.lens_id == cfg.name.split("/")[-1]
+        if cfg.name.startswith("google/"):
+            assert cfg.lens_id.endswith("-it"), f"{name} lens is not -it: {cfg.lens_id}"
+            assert cfg.lens_id == cfg.name.split("/")[-1]
+        else:
+            assert not cfg.name.lower().endswith("-base"), f"{name} is a base model"
+            assert not cfg.lens_id.endswith("-base"), f"{name} lens is a base lens"
+            # Lens dirs use Neuronpedia's short ids (llama3.1-8b-it); the file names the exact model.
+            assert cfg.lens_file.startswith(cfg.name.split("/")[-1] + "_"), cfg.lens_file
 
 
 def test_unknown_preset_raises():

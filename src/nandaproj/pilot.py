@@ -101,8 +101,10 @@ def build_chat(item: deception.DeceptionItem, condition: str, fmt: str) -> list[
 
 def render(tok, item: deception.DeceptionItem, condition: str, fmt: str) -> str:
     """Chat-templated prompt ending at the answer slot (as `deception.render`)."""
+    # `enable_thinking=False` makes Qwen3 emit an empty think block instead of reasoning;
+    # templates that do not reference it (Gemma's) ignore it, so their bytes are unchanged.
     rendered = tok.apply_chat_template(build_chat(item, condition, fmt), tokenize=False,
-                                       add_generation_prompt=True)
+                                       add_generation_prompt=True, enable_thinking=False)
     return f"{rendered}{deception.ANSWER_PREFIX}"
 
 

@@ -95,8 +95,10 @@ def run(args) -> None:
         prompt = pilot.render(tok, it.item, cond, fmt)
         ids = tok(prompt, return_tensors="pt", add_special_tokens=False).input_ids
         # One tokenization for everything, exactly one <bos> (the plan-2 seam).
-        assert int((ids == tok.bos_token_id).sum()) == 1 and int(ids[0, 0]) == tok.bos_token_id, \
-            f"{it.item.item_id}/{cond}/{fmt}: expected exactly one leading <bos>"
+        # Qwen has no <bos>; there the check is that the template added none either.
+        if tok.bos_token_id is not None:
+            assert int((ids == tok.bos_token_id).sum()) == 1 and int(ids[0, 0]) == tok.bos_token_id, \
+                f"{it.item.item_id}/{cond}/{fmt}: expected exactly one leading <bos>"
         with torch.no_grad():
             logits = model(ids.to(model.device)).logits[0, -1]
         probs = torch.softmax(logits.float(), dim=-1).cpu().numpy()
