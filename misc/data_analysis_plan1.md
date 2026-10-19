@@ -1,3 +1,5 @@
+> **Plan-1 era (Arm B / 02_behavioral sizing). Archived 2026-09-12; the layer count and dataset sizes here are stale.**
+
 # Data Size & Time Analysis for 02_behavioral
 
 ## Model: gemma-3-4b-it

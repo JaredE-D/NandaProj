@@ -1,3 +1,5 @@
+> **Superseded 2026-09-12 by [`../PLAN3.md`](../PLAN3.md).** Kept intact for its registrations (§7, §12, §13); code and notebooks cite it as "PLAN2 §n".
+
 # PLAN2 — Where does a lie get made? Belief, report, and the edit between them
 
 **Target:** MATS application (Neel Nanda stream). **Budget:** ~20 h, <$50 (est. ~$5).

@@ -1,8 +1,8 @@
 # NandaProj — project instructions
 
 Research project for a MATS application (Neel Nanda stream). See `SPEC.md` for the
-environment and `PLAN2.md` for the research plan (`misc/plan1old.md` is the superseded
-first plan, kept for its pre-registration).
+environment and `PLAN3.md` for the research plan (`misc/plan2old.md` and `misc/plan1old.md` are the superseded
+earlier plans, kept for their pre-registrations; code and notebook comments citing "PLAN2 §n" resolve to `misc/plan2old.md`).
 
 ## Commits
 

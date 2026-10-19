@@ -10,6 +10,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+# Publication figures (scripts/pubplots.py). Not needed on the GPU box, which
+# renders with plotly; this is the local, static-export path.
+plot = ["matplotlib>=3.8"]
 
 [build-system]
 requires = ["hatchling"]

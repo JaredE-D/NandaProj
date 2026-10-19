@@ -107,6 +107,16 @@ def grouped_folds(groups: Sequence[str]) -> Iterable[tuple[np.ndarray, np.ndarra
         yield train, test
 
 
+def grouped_kfold(groups: Sequence[str], k: int,
+                  seed: int) -> list[tuple[np.ndarray, np.ndarray]]:
+    """`k` folds that hold out whole groups, assigned by a seeded shuffle of the groups."""
+    groups = np.asarray(groups)
+    unique = np.array(list(dict.fromkeys(groups)))
+    parts = np.array_split(np.random.default_rng(seed).permutation(unique), k)
+    return [(np.flatnonzero(~np.isin(groups, held)), np.flatnonzero(np.isin(groups, held)))
+            for held in parts]
+
+
 def cv_accuracy(X: np.ndarray, y: np.ndarray, groups: Sequence[str],
                 fit: Fit = fit_mean_diff, scale: bool = True) -> float:
     """Leave-one-group-out accuracy of `fit`, standardising inside each fold."""
