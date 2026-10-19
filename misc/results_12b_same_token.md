@@ -97,6 +97,9 @@ Masked ids: every spelling of yes/no/a/b (24). Highest baseline CI high on these
 | L30 | 0.970 | 0.971 | 0.971 | 0.946 | 0.575 |
 | L40 | 0.970 | 0.970 | 0.964 | 0.963 | 0.618 |
 
+The PCA-16 variant was then added to `jlens_12b.py report` with its own max-over-layers
+null: best L30 **0.971 [0.947, 0.991]**, null p95 0.611, bar met (dashed line in the figure).
+
 So on the clean contrast all three readouts — J-lens, logit lens, a small residual probe —
 detect the lie at ~0.96–0.97. The lie lies along a top-variance direction of D-slot
 activations (8 PCs suffice).
@@ -119,6 +122,24 @@ reading is a tendency over many tokens, not a clean single concept.
 
 Predictions: **P5 not supported** as written — the J-lens is not below the probe; with the
 probe sized for n, they tie. **P6 supported** — J-lens and logit lens CIs overlap.
+
+## Zero-shot J-lens score (exploratory addendum)
+
+`scripts/jlens_zeroshot_12b.py`, `results/jlens_zeroshot_12b_gemma-3-12b-it.json`. Score = J-lens
+probability (within the stored top-50) on 31 vocab ids spelling error, errors, wrong, incorrect,
+false, mistake, mistaken, doubt, untrue, inaccurate. No fitting. Same 420 rows.
+
+| | best layer | AUROC | null p95 (max over layers, 1000 item perms) | balanced at median | cells AUROC |
+|---|---|---|---|---|---|
+| J-lens | L26 | **0.951** | 0.574 | 0.870 | 0.89–0.99 |
+| logit lens | L26 | 0.718 | 0.557 | 0.629 | 0.46–0.90 |
+
+J-lens AUROC by layer: 0.50 through L22, 0.83 (L24), 0.95 (L26), 0.94, 0.90, 0.86, 0.86, then
+falling to 0.51 by L46. Per word at L26: `incorrect` 0.949 (present in 81% of rows), `error` 0.848,
+`false` 0.650, `doubt` 0.635; the rest never reach the top-50. Dropping `false`: 0.951.
+
+Not blind (the fitted tokens, including ` Incorrect`, were seen first), one model, 420 rows. But
+unlike the trained comparison, here the J-lens clearly beats the logit lens (0.95 vs 0.72).
 
 ## Steering (registered: slot L42; others exploratory)
 

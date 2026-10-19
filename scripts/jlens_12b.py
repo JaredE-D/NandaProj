@@ -32,6 +32,7 @@ OUT = config.RESULTS / f"jlens_12b_{LENS}.json"
 SEED = 20261018
 K_STORE = 50
 K_TOP = 20                       # plan 2's primary K
+POST_HOC_PCA = 16                # the registered PCA-256 probe overfits ~380 training rows per fold
 MASK_WORDS = ("yes", "no", "a", "b")
 LAYER_STRIDE = 2
 
@@ -143,13 +144,15 @@ def report(args) -> None:
     baseline_ci_high = max(b["ci"][1] for b in base.values())
 
     resid = np.load(CAPTURE.with_suffix(".npz"))["resid"]
-    curves, null_max, t0 = {"jlens": {}, "logit": {}, "probe": {}}, {}, time.time()
+    curves, null_max, t0 = {"jlens": {}, "logit": {}, "probe": {}, "probe_pca16": {}}, {}, time.time()
     for li, layer in enumerate(layers):
+        X = np.asarray(resid[idx, 1, layer, :], dtype=np.float32)
         feats = {
             "jlens": baselines.topk_features(T["j_ids"][:, li], T["j_lp"][:, li], K_TOP, banned),
             "logit": baselines.topk_features(T["l_ids"][:, li], T["l_lp"][:, li], K_TOP, banned),
-            "probe": baselines.fixed_features(lp.pca_scores(
-                np.asarray(resid[idx, 1, layer, :], dtype=np.float32)).astype(np.float32)),
+            "probe": baselines.fixed_features(lp.pca_scores(X).astype(np.float32)),
+            # Post hoc, not registered: the same probe sized for n.
+            "probe_pca16": baselines.fixed_features(lp.pca_scores(X, POST_HOC_PCA).astype(np.float32)),
         }
         for name, f in feats.items():
             curves[name][layer], nulls = score(f)
@@ -191,12 +194,14 @@ def plot(layers, curves, summary, base, baseline_ci_high) -> None:
         ax.spines[side].set_visible(False)
     lo = min(b["ci"][0] for b in base.values() if b["ci"][1] == baseline_ci_high)
     ax.axhspan(lo, baseline_ci_high, color="#7a7975", alpha=0.18, linewidth=0, label="best baseline 95% CI")
-    for colour, name, label in ((pp.SERIES[0], "probe", "residual probe"),
+    for colour, name, label in ((pp.SERIES[0], "probe", "residual probe, PCA-256 (registered)"),
                                 (pp.SERIES[1], "jlens", "masked J-lens top-20"),
-                                (pp.SERIES[2], "logit", "masked logit lens top-20")):
+                                (pp.SERIES[2], "logit", "masked logit lens top-20"),
+                                (pp.SERIES[0], "probe_pca16", "residual probe, PCA-16 (post hoc)")):
         c = curves[name]
         ax.plot(layers, [c[l]["balanced"] for l in layers], color=colour, linewidth=2,
-                marker="o", markersize=3, label=label)
+                marker="o", markersize=3, label=label,
+                linestyle="--" if name == "probe_pca16" else "-")
         ax.fill_between(layers, [c[l]["ci"][0] for l in layers], [c[l]["ci"][1] for l in layers],
                         color=colour, alpha=0.16, linewidth=0)
         ax.axhline(summary[name]["null_p95"], color=colour, linestyle=":", linewidth=1.1)

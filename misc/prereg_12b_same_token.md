@@ -120,3 +120,17 @@ Slot-only steering at L42 (registered) and L30 was no better than a random direc
 equal norm. Follow-up, labelled exploratory: the same cross-fitted slot directions applied
 at **every position** (`--apply-from all`) at L20 (where the probe signal first appears)
 and L42.
+
+## Zero-shot J-lens addendum (2026-10-18, exploratory, before computing)
+
+Not blind: the fitted J-lens weights (error/doubt tokens) were seen first, so this is
+exploratory. To limit steering, the list is plain English synonyms of "incorrect", chosen
+by meaning, not copied from the fitted weights (which were mostly non-English):
+**error, errors, wrong, incorrect, false, mistake, mistaken, doubt, untrue, inaccurate.**
+Every vocab id whose decoded string (stripped, lower-cased) is in the list counts.
+
+Score per row and layer: total J-lens probability on those ids within the row's stored
+top-50 (0 if none appear). No fitting, no labels. Same 420 rows. Primary: AUROC per layer;
+null: 1000 item-level label permutations within truth arm, max over layers, p95. Also
+reported: AUROC within each (truth x emitted letter) cell, and the same score from the logit
+lens. Prediction: J-lens AUROC above null at L24–40, below the trained J-lens classifier.
