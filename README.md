@@ -1,5 +1,5 @@
 # When Gemma lies, the Jacobian lens reads "error"
-This page was mainly written by Claude as a summary with adjustments from Me.
+This page was written by Claude as a summary with adjustments from me.
 
 **One-page summary.** Model: `gemma-3-12b-it` (earlier stages `gemma-3-4b-it`; cross-model
 check on `Llama-3.1-8B-Instruct` and `Qwen3-14B`). Tools: the
